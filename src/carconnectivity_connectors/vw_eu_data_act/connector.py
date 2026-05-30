@@ -37,7 +37,7 @@ from carconnectivity_connectors.vw_eu_data_act.client import (
     DEFAULT_BRAND, DEFAULT_COUNTRY, DEFAULT_LANGUAGE, NO_CONTENT_SUFFIX,
     ApiError, AuthError, EudaApiClient,
 )
-from carconnectivity_connectors.vw_eu_data_act.dataset import Dataset, parse_timestamp
+from carconnectivity_connectors.vw_eu_data_act.dataset import Dataset, parse_timestamp, resolve_distance_unit
 from carconnectivity_connectors.vw_eu_data_act.vehicle import VWEudaElectricVehicle, VWEudaVehicle
 
 if TYPE_CHECKING:
@@ -76,12 +76,21 @@ WINDOW_HEATING_MAPPING: "Dict[str, WindowHeatings.HeatingState]" = {
 
 
 def _filename_timestamp(name: str) -> "Optional[datetime]":
-    """Parse the leading YYYYMMDDhhmmss in a dataset filename."""
-    stem = name.split("_", 1)[0]
-    try:
-        return datetime.strptime(stem, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
+    """Parse a YYYYMMDDhhmmss segment from a dataset filename.
+
+    Handles both layouts seen in the wild ("TIMESTAMP_VIN.zip" and
+    "VIN_TIMESTAMP.zip") by scanning the underscore-separated parts
+    right-to-left for the first one that parses as a timestamp. Only used as a
+    fallback when a listing entry lacks ``createdOn``; getting it wrong there
+    collapses the newest-dataset sort and can select the wrong dataset.
+    """
+    stem = name.rsplit(".", 1)[0]
+    for part in reversed(stem.split("_")):
+        try:
+            return datetime.strptime(part, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
 
 
 def _created_on(entry: dict) -> "Optional[datetime]":
@@ -327,10 +336,13 @@ class Connector(BaseConnector):
             garage.replace_vehicle(vin, vehicle)
             vehicle.type._set_value(GenericVehicle.Type.ELECTRIC)  # pylint: disable=protected-access
 
-        # Odometer (mileage.value, km)
+        # Odometer (mileage.value). The portal reports km or miles depending on
+        # the vehicle; the unit comes from the companion mileage.unit enum, with
+        # km as the fallback when that field is absent.
         mileage = dataset.value_of('mileage.value')
         if mileage is not None:
-            vehicle.odometer._set_value(value=mileage, measured=captured_at, unit=Length.KM)  # pylint: disable=protected-access
+            mileage_unit = Length.MI if resolve_distance_unit(dataset.value_of('mileage.unit')) == 'mi' else Length.KM
+            vehicle.odometer._set_value(value=mileage, measured=captured_at, unit=mileage_unit)  # pylint: disable=protected-access
             vehicle.odometer.precision = 1
 
         # Doors lock state

@@ -74,6 +74,28 @@ def parse_value(raw: Optional[str], type_hint: Optional[str] = None):
     return s
 
 
+# Distance unit enums (e.g. ``mileage.unit``) -> canonical short unit. The
+# portal reports mileage/range in either miles or kilometres depending on the
+# vehicle, so the unit must not be hardcoded; it is read from a companion
+# ``*.unit`` field when present.
+DISTANCE_UNIT_BY_ENUM: Dict[str, str] = {
+    "MILES": "mi",
+    "MILE": "mi",
+    "KM": "km",
+    "KILOMETER": "km",
+    "KILOMETERS": "km",
+    "KILOMETRE": "km",
+    "KILOMETRES": "km",
+}
+
+
+def resolve_distance_unit(enum_value, default: Optional[str] = None) -> Optional[str]:
+    """Map a distance-unit enum value (e.g. "MILES") to a short unit ("mi")."""
+    if isinstance(enum_value, str):
+        return DISTANCE_UNIT_BY_ENUM.get(enum_value.strip().upper(), default)
+    return default
+
+
 def parse_timestamp(raw: Optional[str]) -> Optional[datetime]:
     """Parse the various timestamp encodings seen in datasets."""
     s = (raw or "").strip()
@@ -143,16 +165,18 @@ class Dataset:
         )
 
     def by_field(self, field_name: str) -> Optional[DataPoint]:
-        """Return the first point matching ``field_name`` (or ``None``).
+        """Return a single data point for a (possibly duplicated) field name.
 
-        Duplicated field names (``timestamp``, ``car_captured_time`` …) are
-        uncommon among the curated fields this connector maps; the first match
-        is returned when present.
+        The portal merges several report snapshots into one flat array with no
+        ordering guarantee and no way to tell which value is "live", so a field
+        like ``charging_state_report.current_charge_state`` can appear several
+        times under different UUIDs with conflicting values. We pick the entry
+        with the smallest ``key`` (UUID): an arbitrary but *stable* choice, so a
+        mapped attribute consistently tracks the same data point across refreshes
+        instead of flip-flopping when the portal reshuffles the array.
         """
-        for dp in self.points.values():
-            if dp.field_name == field_name:
-                return dp
-        return None
+        matches = [dp for dp in self.points.values() if dp.field_name == field_name]
+        return min(matches, key=lambda dp: dp.key) if matches else None
 
     def value_of(self, field_name: str):
         """Return the typed value of ``field_name`` or ``None`` if absent."""

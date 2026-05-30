@@ -17,8 +17,10 @@ from carconnectivity.window_heating import WindowHeatings
 
 import requests
 
+from carconnectivity.units import Length
+
 from carconnectivity_connectors.vw_eu_data_act.client import ApiError, EudaApiClient
-from carconnectivity_connectors.vw_eu_data_act.connector import Connector
+from carconnectivity_connectors.vw_eu_data_act.connector import Connector, _filename_timestamp
 from carconnectivity_connectors.vw_eu_data_act.dataset import Dataset
 from carconnectivity_connectors.vw_eu_data_act.vehicle import VWEudaElectricVehicle, VWEudaVehicle
 
@@ -121,6 +123,71 @@ def test_update_vehicles_flushes_transaction(connector):
     # The on_transaction_end observer fired (discovery would be (re)published).
     assert fired, "transaction_end() was not called; HA discovery would not refresh"
     assert garage.get_vehicle(VIN).odometer.value == 116803
+
+
+def test_by_field_picks_smallest_uuid_deterministically():
+    """A curated field can appear several times under different UUIDs with
+    conflicting values; the portal does not order the array. by_field() must
+    return the entry with the smallest UUID so the mapped attribute tracks the
+    same data point across refreshes instead of flip-flopping."""
+    data = [
+        {"key": "cccc", "dataFieldName": "charging_state_report.current_charge_state",
+         "value": "CHARGE_STATE_CHARGING"},
+        {"key": "aaaa", "dataFieldName": "charging_state_report.current_charge_state",
+         "value": "CHARGE_STATE_OFF"},
+        {"key": "bbbb", "dataFieldName": "charging_state_report.current_charge_state",
+         "value": "CHARGE_STATE_ERROR"},
+    ]
+    # smallest UUID ("aaaa") wins regardless of array order
+    assert Dataset.from_json({"vin": VIN, "Data": data}).value_of(
+        "charging_state_report.current_charge_state") == "CHARGE_STATE_OFF"
+    assert Dataset.from_json({"vin": VIN, "Data": list(reversed(data))}).value_of(
+        "charging_state_report.current_charge_state") == "CHARGE_STATE_OFF"
+
+
+def test_filename_timestamp_both_layouts():
+    """createdOn-less listings fall back to the filename timestamp; both
+    "TIMESTAMP_VIN.zip" and "VIN_TIMESTAMP.zip" layouts must parse, else the
+    newest-dataset sort collapses and the wrong dataset can be selected."""
+    ts_first = _filename_timestamp("20260530104136_%s.zip" % VIN)
+    ts_last = _filename_timestamp("%s_20260530104136.zip" % VIN)
+    assert ts_first is not None and ts_last is not None
+    assert ts_first == ts_last
+    assert ts_first.isoformat().startswith("2026-05-30T10:41:36")
+    # no parseable segment -> None (sort falls back to datetime.min)
+    assert _filename_timestamp("no_content_found.zip") is None
+
+
+def test_mileage_unit_resolved_from_companion_field(connector):
+    """Vehicles reporting in miles expose a mileage.unit enum; the odometer unit
+    must follow it instead of being hardcoded to km."""
+    garage = connector.car_connectivity.garage
+    vehicle = VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector)
+    garage.add_vehicle(VIN, vehicle)
+
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "k1", "dataFieldName": "mileage.value", "value": "72580"},
+        {"key": "k2", "dataFieldName": "mileage.unit", "value": "MILES"},
+    ]})
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+
+    vehicle = garage.get_vehicle(VIN)
+    assert vehicle.odometer.value == 72580
+    assert vehicle.odometer.unit == Length.MI
+
+
+def test_mileage_unit_defaults_to_km_when_absent(connector):
+    """Without a mileage.unit companion field, the odometer stays in km."""
+    garage = connector.car_connectivity.garage
+    vehicle = VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector)
+    garage.add_vehicle(VIN, vehicle)
+
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "k1", "dataFieldName": "mileage.value", "value": "116803"},
+    ]})
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+
+    assert garage.get_vehicle(VIN).odometer.unit == Length.KM
 
 
 def test_network_errors_become_apierror():
