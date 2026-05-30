@@ -96,6 +96,46 @@ def resolve_distance_unit(enum_value, default: Optional[str] = None) -> Optional
     return default
 
 
+# Ordered enum members (protobuf index order) for the curated enum fields this
+# connector maps, lifted from the VW EU Data Act data dictionary. The full
+# 1000-field dictionary is intentionally not shipped (see module docstring);
+# only the member order for the handful of enums we map is needed, to resolve
+# the raw protobuf integer index back to its label on the occasions the portal
+# delivers the index (e.g. "6") instead of the string label.
+ENUM_MEMBERS: Dict[str, tuple] = {
+    "charging_state_report.current_charge_state": (
+        "CHARGE_STATE_NOT_READY_FOR_CHARGING",                                 # 0
+        "CHARGE_STATE_READY_FOR_CHARGING",                                     # 1
+        "CHARGE_STATE_CHARGING_HV_BATTERY",                                    # 2
+        "CHARGE_STATE_DISCHARGING",                                            # 3
+        "CHARGE_STATE_CHARGE_PURPOSE_REACHED_AND_NOT_CONSERVATION_CHARGING",   # 4
+        "CHARGE_STATE_CHARGE_PURPOSE_REACHED_AND_CONSERVATION",                # 5
+        "CHARGE_STATE_CONSERVATION_CHARGING",                                  # 6
+        "CHARGE_STATE_CHARGING_ERROR",                                         # 7
+    ),
+    "window_heating_state": (
+        "WINDOW_HEATING_STATE_OFF",                                            # 0
+        "WINDOW_HEATING_STATE_ON",                                            # 1
+    ),
+}
+
+
+def resolve_enum_index(field_name: str, value):
+    """Resolve a raw protobuf enum index to its label, where applicable.
+
+    Enum fields occasionally arrive as the integer index instead of the string
+    label. Map it back using the documented member order for ``field_name``.
+    Returns ``value`` unchanged when it is not an int (or is a bool), or when
+    the field/index is unknown.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return value
+    members = ENUM_MEMBERS.get(field_name)
+    if members is not None and 0 <= value < len(members):
+        return members[value]
+    return value
+
+
 def parse_timestamp(raw: Optional[str]) -> Optional[datetime]:
     """Parse the various timestamp encodings seen in datasets."""
     s = (raw or "").strip()
@@ -128,8 +168,13 @@ class DataPoint:
 
     @property
     def value(self):
-        """The typed value (int/float/bool/str/None)."""
-        return parse_value(self.raw_value)
+        """The typed value (int/float/bool/str/None).
+
+        Enum fields occasionally deliver the raw protobuf integer index instead
+        of the label; it is resolved back to the documented label so downstream
+        mapping (which keys off the label string) keeps working.
+        """
+        return resolve_enum_index(self.field_name, parse_value(self.raw_value))
 
 
 @dataclass

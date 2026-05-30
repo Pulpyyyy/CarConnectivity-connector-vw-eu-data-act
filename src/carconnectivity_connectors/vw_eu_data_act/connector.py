@@ -58,6 +58,9 @@ RETRY_INTERVAL = timedelta(minutes=1)
 MIN_INTERVAL = timedelta(seconds=60)
 
 # Map the portal's charge-state enum to the generic CarConnectivity enum.
+# Two label spellings are accepted per state: the values originally observed
+# from the portal, and the canonical labels from the data dictionary (the
+# latter are what an integer index resolves to, see dataset.ENUM_MEMBERS).
 CHARGE_STATE_MAPPING: "Dict[str, Charging.ChargingState]" = {
     'CHARGE_STATE_OFF': Charging.ChargingState.OFF,
     'CHARGE_STATE_NOT_READY_FOR_CHARGING': Charging.ChargingState.OFF,
@@ -69,6 +72,12 @@ CHARGE_STATE_MAPPING: "Dict[str, Charging.ChargingState]" = {
     'CHARGE_STATE_ERROR': Charging.ChargingState.ERROR,
     'CHARGE_STATE_DISCHARGING': Charging.ChargingState.DISCHARGING,
     'CHARGE_STATE_INVALID': Charging.ChargingState.UNKNOWN,
+    # Canonical data-dictionary labels (also what enum indices resolve to).
+    'CHARGE_STATE_CHARGING_HV_BATTERY': Charging.ChargingState.CHARGING,
+    'CHARGE_STATE_CHARGE_PURPOSE_REACHED_AND_NOT_CONSERVATION_CHARGING': Charging.ChargingState.OFF,
+    'CHARGE_STATE_CHARGE_PURPOSE_REACHED_AND_CONSERVATION': Charging.ChargingState.CONSERVATION,
+    'CHARGE_STATE_CONSERVATION_CHARGING': Charging.ChargingState.CONSERVATION,
+    'CHARGE_STATE_CHARGING_ERROR': Charging.ChargingState.ERROR,
 }
 
 WINDOW_HEATING_MAPPING: "Dict[str, WindowHeatings.HeatingState]" = {

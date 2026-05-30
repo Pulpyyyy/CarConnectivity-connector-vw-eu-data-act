@@ -190,6 +190,51 @@ def test_mileage_unit_defaults_to_km_when_absent(connector):
     assert garage.get_vehicle(VIN).odometer.unit == Length.KM
 
 
+def test_enum_integer_index_resolves_to_label():
+    """Enum fields occasionally arrive as the raw protobuf integer index instead
+    of the label; value_of() must resolve it back to the documented label."""
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        # index 2 of current_charge_state -> CHARGE_STATE_CHARGING_HV_BATTERY
+        {"key": "k1", "dataFieldName": "charging_state_report.current_charge_state", "value": "2"},
+        # index 1 of window_heating_state -> WINDOW_HEATING_STATE_ON
+        {"key": "k2", "dataFieldName": "window_heating_state", "value": "1"},
+    ]})
+    assert ds.value_of("charging_state_report.current_charge_state") == "CHARGE_STATE_CHARGING_HV_BATTERY"
+    assert ds.value_of("window_heating_state") == "WINDOW_HEATING_STATE_ON"
+    # string labels still pass through untouched
+    ds2 = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "k1", "dataFieldName": "charging_state_report.current_charge_state",
+         "value": "CHARGE_STATE_READY_FOR_CHARGING"},
+    ]})
+    assert ds2.value_of("charging_state_report.current_charge_state") == "CHARGE_STATE_READY_FOR_CHARGING"
+    # out-of-range index and non-enum integer fields are left as-is
+    ds3 = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "k1", "dataFieldName": "charging_state_report.current_charge_state", "value": "99"},
+        {"key": "k2", "dataFieldName": "mileage.value", "value": "116803"},
+    ]})
+    assert ds3.value_of("charging_state_report.current_charge_state") == 99
+    assert ds3.value_of("mileage.value") == 116803
+
+
+def test_enum_integer_index_maps_to_charging_state(connector):
+    """An integer charge-state index resolves to its label and then maps onto the
+    CarConnectivity charging enum (index 2 -> CHARGING)."""
+    garage = connector.car_connectivity.garage
+    vehicle = VWEudaElectricVehicle(vin=VIN, garage=garage, managing_connector=connector)
+    garage.add_vehicle(VIN, vehicle)
+
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "k0", "dataFieldName": "battery_state_report.soc", "value": "55"},
+        {"key": "k1", "dataFieldName": "charging_state_report.current_charge_state", "value": "2"},
+        {"key": "k2", "dataFieldName": "window_heating_state", "value": "1"},
+    ]})
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+
+    vehicle = garage.get_vehicle(VIN)
+    assert vehicle.charging.state.value == Charging.ChargingState.CHARGING
+    assert vehicle.window_heatings.heating_state.value == WindowHeatings.HeatingState.ON
+
+
 def test_connector_accepts_initialization_kwarg():
     """Newer carconnectivity cores pass an ``initialization`` kwarg when loading
     connectors. The connector must accept it without raising (issue #1):
