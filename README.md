@@ -19,6 +19,28 @@ This connector authenticates against the portal (OIDC login, reusing the proven 
 vehicle, and maps the available data points onto native CarConnectivity attributes as **read-only**
 values.
 
+## Prerequisites — enable continuous data on the portal first
+
+Before adding the connector, you must enable a **continuous 15-minute data request** for your
+vehicle on the EU Data Act portal. The connector only *downloads* the datasets the portal
+generates — it cannot create the data request for you, and without an active request there will be
+nothing to fetch.
+
+1. Open <https://eu-data-act.drivesomethinggreater.com/> and **log in** with your Volkswagen ID
+   (the same email/password you'll use in the connector config).
+2. Go to **Data clusters → Vehicle overview**.
+3. **Connect your car** to the site if it isn't already listed (follow the on-screen
+   pairing/consent steps for your VIN).
+4. Click **Get customised data** for the vehicle and follow the instructions to configure a
+   **continuous** data request with a **15-minute** frequency.
+5. Wait until the portal starts producing datasets (you'll see ZIP files appear in the vehicle's
+   data delivery list, roughly every 15 minutes). The first file can take a little while to show up.
+
+Once datasets are being generated, continue with the installation below.
+
+> The connector polls at most every 15 minutes because that is how often the portal publishes new
+> data — a shorter interval cannot produce fresher values.
+
 ## Installation
 
 ```bash
