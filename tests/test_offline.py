@@ -5,6 +5,7 @@ CarConnectivity garage and exercises the connector's ``_map_dataset`` against
 the sample dataset shipped by the EU Data Act portal.
 """
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -389,6 +390,7 @@ def test_no_content_latest_interval_reschedules_to_next_interval(connector):
     # Pretend the older content dataset was already mapped on a previous cycle.
     connector._identifiers[VIN] = "ident"  # pylint: disable=protected-access
     connector._last_dataset[VIN] = older_name  # pylint: disable=protected-access
+    connector._bootstrapped.add(VIN)  # pylint: disable=protected-access
 
     class _FakeClient:
         def list_datasets(self, vin, identifier):
@@ -551,6 +553,7 @@ def test_no_content_latest_interval_reschedules_to_next_interval(connector):
     # Pretend the older content dataset was already mapped on a previous cycle.
     connector._identifiers[VIN] = "ident"  # pylint: disable=protected-access
     connector._last_dataset[VIN] = older_name  # pylint: disable=protected-access
+    connector._bootstrapped.add(VIN)  # pylint: disable=protected-access
 
     class _FakeClient:
         def list_datasets(self, vin, identifier):
@@ -637,7 +640,8 @@ def test_unmapped_field_detection(caplog):
     ds = Dataset.from_json({"vin": VIN, "Data": [
         {"key": "k1", "dataFieldName": "some_new_sensor", "value": "42"},
     ]})
-    Connector._detect_unmapped_fields(VIN, ds)
+    with caplog.at_level(logging.INFO, logger="carconnectivity.connectors.vw_eu_data_act"):
+        Connector._detect_unmapped_fields(VIN, ds)
     assert "New unmapped sensor for" in caplog.text
     assert "some_new_sensor" in caplog.text
 
@@ -667,14 +671,14 @@ def test_bootstrap_skips_already_bootstrapped(connector):
     fake = _FakeClient()
     connector.client = fake
 
-    # First call: bootstrap + normal fetch = 2 downloads
+    # First call: bootstrap downloads everything, skips redundant normal fetch
     connector._update_vehicle(VIN)
     assert VIN in connector._bootstrapped
-    assert fake.download_count == 2
+    assert fake.download_count == 1
 
-    # Second call: only normal fetch = 1 download
+    # Second call: newest dataset already in _last_dataset, no download
     connector._update_vehicle(VIN)
-    assert fake.download_count == 3
+    assert fake.download_count == 1
 
 
 def test_charge_type_rate_and_remaining_time_mapped(connector):
@@ -799,6 +803,7 @@ def test_no_content_latest_interval_reschedules_to_next_interval(connector):
     # Pretend the older content dataset was already mapped on a previous cycle.
     connector._identifiers[VIN] = "ident"  # pylint: disable=protected-access
     connector._last_dataset[VIN] = older_name  # pylint: disable=protected-access
+    connector._bootstrapped.add(VIN)  # pylint: disable=protected-access
 
     class _FakeClient:
         def list_datasets(self, vin, identifier):
@@ -885,7 +890,8 @@ def test_unmapped_field_detection(caplog):
     ds = Dataset.from_json({"vin": VIN, "Data": [
         {"key": "k1", "dataFieldName": "some_new_sensor", "value": "42"},
     ]})
-    Connector._detect_unmapped_fields(VIN, ds)
+    with caplog.at_level(logging.INFO, logger="carconnectivity.connectors.vw_eu_data_act"):
+        Connector._detect_unmapped_fields(VIN, ds)
     assert "New unmapped sensor for" in caplog.text
     assert "some_new_sensor" in caplog.text
 
@@ -912,11 +918,11 @@ def test_bootstrap_skips_already_bootstrapped(connector):
     fake = _FakeClient()
     connector.client = fake
 
-    # First call: bootstrap + normal fetch = 2 downloads
+    # First call: bootstrap downloads everything, skips redundant normal fetch
     connector._update_vehicle(VIN)
     assert VIN in connector._bootstrapped
-    assert fake.download_count == 2
+    assert fake.download_count == 1
 
-    # Second call: only normal fetch = 1 download
+    # Second call: newest dataset already in _last_dataset, no download
     connector._update_vehicle(VIN)
-    assert fake.download_count == 3
+    assert fake.download_count == 1
