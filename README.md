@@ -1,5 +1,12 @@
 # CarConnectivity Connector for the Volkswagen EU Data Act Portal
 
+[![GitHub sourcecode](https://img.shields.io/badge/Source-GitHub-green)](https://github.com/mikrohard/CarConnectivity-connector-vw-eu-data-act/)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/mikrohard/CarConnectivity-connector-vw-eu-data-act)](https://github.com/mikrohard/CarConnectivity-connector-vw-eu-data-act/releases/latest)
+[![GitHub](https://img.shields.io/github/license/mikrohard/CarConnectivity-connector-vw-eu-data-act)](https://github.com/mikrohard/CarConnectivity-connector-vw-eu-data-act/blob/main/LICENSE)
+[![GitHub issues](https://img.shields.io/github/issues/mikrohard/CarConnectivity-connector-vw-eu-data-act)](https://github.com/mikrohard/CarConnectivity-connector-vw-eu-data-act/issues)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/carconnectivity-connector-vw-eu-data-act?label=PyPI%20Downloads)](https://pypi.org/project/carconnectivity-connector-vw-eu-data-act/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/carconnectivity-connector-vw-eu-data-act)](https://pypi.org/project/carconnectivity-connector-vw-eu-data-act/)
+
 A [CarConnectivity](https://github.com/tillsteinbach/CarConnectivity) connector that reads vehicle
 data from the **Volkswagen EU Data Act portal** (`eu-data-act.drivesomethinggreater.com`).
 
