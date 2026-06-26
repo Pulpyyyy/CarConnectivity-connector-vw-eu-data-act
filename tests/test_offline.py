@@ -686,3 +686,42 @@ def test_flat_data_egolf_payload_promotes_and_maps(connector):
     assert drive.level.value == 26
     assert drive.range.value == 67
     assert drive.range.unit == Length.KM
+
+
+def test_phev_promotes_to_hybrid_and_maps_both_drives(connector):
+    """A dataset with both battery and fuel fields -> HybridVehicle with two drives."""
+    from carconnectivity.vehicle import HybridVehicle
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "a", "dataFieldName": "state_of_charge", "value": "25"},
+        {"key": "b", "dataFieldName": "cruising_range_secondary_engine", "value": "11"},
+        {"key": "c", "dataFieldName": "long_term_data_average_electr_engine_consumption", "value": "160"},
+        {"key": "d", "dataFieldName": "fuel_level_current_level", "value": "37"},
+        {"key": "e", "dataFieldName": "cruising_range_primary_engine", "value": "210"},
+        {"key": "f", "dataFieldName": "long_term_data_average_fuel_consumption", "value": "14"},
+    ]})
+    connector._map_dataset(VIN, ds)
+    v = garage.get_vehicle(VIN)
+    assert isinstance(v, HybridVehicle)
+    electric = v.get_electric_drive()
+    combustion = v.get_combustion_drive()
+    assert electric.level.value == 25 and electric.range.value == 11
+    assert electric.consumption.value == 16.0   # 160 kWh/1000km -> 16.0 kWh/100km
+    assert combustion.level.value == 37 and combustion.range.value == 210
+    assert combustion.consumption.value == 1.4   # 14 L/1000km -> 1.4 L/100km
+
+
+def test_pure_ev_stays_electric_not_hybrid(connector):
+    """A battery-only dataset stays a pure electric vehicle (no combustion drive)."""
+    from carconnectivity.vehicle import CombustionVehicle
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "a", "dataFieldName": "battery_state_report.soc", "value": "69"},
+        {"key": "b", "dataFieldName": "range", "value": "312"},
+    ]})
+    connector._map_dataset(VIN, ds)
+    v = garage.get_vehicle(VIN)
+    assert not isinstance(v, CombustionVehicle)
+    assert v.get_electric_drive().level.value == 69

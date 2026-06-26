@@ -21,10 +21,10 @@ from datetime import datetime, timedelta, timezone
 
 from carconnectivity.errors import AuthenticationError, RetrievalError, TooManyRequestsError
 from carconnectivity.util import config_remove_credentials
-from carconnectivity.units import EnergyConsumption, Length, Power, Speed, Temperature
+from carconnectivity.units import EnergyConsumption, FuelConsumption, Length, Power, Speed, Temperature
 from carconnectivity.attributes import DurationAttribute, EnumAttribute
-from carconnectivity.vehicle import GenericVehicle
-from carconnectivity.drive import ElectricDrive, GenericDrive
+from carconnectivity.vehicle import GenericVehicle, ElectricVehicle, CombustionVehicle
+from carconnectivity.drive import CombustionDrive, ElectricDrive, GenericDrive
 from carconnectivity.battery import Battery
 from carconnectivity.charging import Charging
 from carconnectivity.charging_connector import ChargingConnector
@@ -47,7 +47,9 @@ from carconnectivity_connectors.vw_eu_data_act.dataset import (
     Dataset, decikelvin_to_celsius, parse_timestamp, resolve_charge_rate_unit, resolve_distance_unit,
 )
 from carconnectivity_connectors.vw_eu_data_act.brands import resolve_brand
-from carconnectivity_connectors.vw_eu_data_act.vehicle import VWEudaElectricVehicle, VWEudaVehicle
+from carconnectivity_connectors.vw_eu_data_act.vehicle import (
+    VWEudaCombustionVehicle, VWEudaElectricVehicle, VWEudaHybridVehicle, VWEudaVehicle,
+)
 
 if TYPE_CHECKING:
     from typing import Any, Dict, List, Optional, Tuple
@@ -182,6 +184,11 @@ KNOWN_MAPPED_FIELDS: set[str] = {
     'external_power_supply_state',
     'remaining_charging_time',
     'long_term_data_average_electr_engine_consumption',
+    # Combustion / PHEV (mapped in _map_combustion).
+    'fuel_level_current_level',
+    'tank_current_level',
+    'long_term_data_average_fuel_consumption',
+    'cruising_range_secondary_engine',
     # Door / window / light status (mapped in _map_status).
     'lock_state',
     'parking_lights',
@@ -617,19 +624,47 @@ class Connector(BaseConnector):
             return
         captured_at = dataset.captured_at
 
-        # Promote to an electric vehicle once we see EV-specific data. Some vehicles
-        # (e.g. eGolf) report the flat field names state_of_charge / cruising_range_primary_engine
-        # instead of the nested battery_state_report.* / charging_state_report.* paths.
-        is_ev = dataset.by_field('battery_state_report.soc') is not None \
-            or dataset.by_field('battery_state_report.charge_power') is not None \
-            or dataset.by_field('charging_state_report.current_charge_state') is not None \
-            or dataset.by_field('state_of_charge') is not None \
-            or dataset.by_field('cruising_range_primary_engine') is not None
-        if is_ev and not isinstance(vehicle, VWEudaElectricVehicle):
-            LOG.debug('Promoting %s to VWEudaElectricVehicle for %s', vehicle.__class__.__name__, vin)
-            vehicle = VWEudaElectricVehicle(garage=garage, origin=vehicle)
+        # Detect the drivetrain from which data the portal reports and promote the
+        # vehicle to the matching subclass. There is no single "powertrain" field
+        # and the field set varies by platform/format, so we detect by presence:
+        #   - electric: battery SoC / charge power / charge state / electric range
+        #   - fuel:     fuel level / petrol consumption
+        # A car reporting both is a plug-in hybrid (PHEV). Promotion only ever moves
+        # "up" (Hybrid is a subclass of both Electric and Combustion), so a partial
+        # dataset never demotes an already-richer vehicle.
+        has_electric = any(dataset.by_field(f) is not None for f in (
+            'battery_state_report.soc', 'battery_state_report.charge_power',
+            'charging_state_report.current_charge_state', 'state_of_charge',
+            'cruising_range_secondary_engine'))
+        has_fuel = any(dataset.by_field(f) is not None for f in (
+            'fuel_level_current_level', 'tank_current_level',
+            'long_term_data_average_fuel_consumption', 'short_term_data_average_fuel_consumption'))
+        # A pure EV in flat format reports only cruising_range_primary_engine (its
+        # electric range) with no fuel fields; treat that as electric.
+        if not has_electric and not has_fuel \
+                and dataset.by_field('cruising_range_primary_engine') is not None:
+            has_electric = True
+
+        # "already" tests the CarConnectivity base capabilities (HybridVehicle is
+        # both an ElectricVehicle and a CombustionVehicle), so a partial dataset
+        # never demotes a richer vehicle.
+        if has_electric and has_fuel:
+            desired, desired_type = VWEudaHybridVehicle, GenericVehicle.Type.HYBRID
+            already = isinstance(vehicle, ElectricVehicle) and isinstance(vehicle, CombustionVehicle)
+        elif has_electric:
+            desired, desired_type = VWEudaElectricVehicle, GenericVehicle.Type.ELECTRIC
+            already = isinstance(vehicle, ElectricVehicle)
+        elif has_fuel:
+            desired, desired_type = VWEudaCombustionVehicle, GenericVehicle.Type.GASOLINE
+            already = isinstance(vehicle, CombustionVehicle)
+        else:
+            desired, desired_type, already = None, None, True
+        if desired is not None and not already:
+            LOG.debug('Promoting %s to %s for %s', vehicle.__class__.__name__, desired.__name__, vin)
+            vehicle = desired(garage=garage, origin=vehicle)
             garage.replace_vehicle(vin, vehicle)
-            vehicle.type._set_value(GenericVehicle.Type.ELECTRIC)  # pylint: disable=protected-access
+            vehicle.type._set_value(desired_type)  # pylint: disable=protected-access
+        is_phev = has_electric and has_fuel
 
         # Odometer (mileage.value). The portal reports km or miles depending on
         # the vehicle; the unit comes from the companion mileage.unit enum, with
@@ -696,7 +731,7 @@ class Connector(BaseConnector):
         # Doors, windows and lights status (applies to all vehicles).
         self._map_status(vehicle, dataset, captured_at)
 
-        if isinstance(vehicle, VWEudaElectricVehicle):
+        if isinstance(vehicle, ElectricVehicle):
             self._map_electric(vehicle, dataset, captured_at)
 
             drive = vehicle.get_electric_drive()
@@ -713,9 +748,12 @@ class Connector(BaseConnector):
                 drive.level._set_value(value=soc, measured=captured_at)  # pylint: disable=protected-access
                 drive.level.precision = 1
 
-            rng = dataset.value_of('cruising_range_primary_engine')
-            if rng is not None:
-                drive.range._set_value(value=rng, measured=captured_at, unit=Length.KM)  # pylint: disable=protected-access
+            # On a PHEV the electric range is the *secondary* engine; on a pure EV
+            # it is reported as the primary engine.
+            e_range = dataset.value_of('cruising_range_secondary_engine') if is_phev \
+                else dataset.value_of('cruising_range_primary_engine')
+            if e_range is not None:
+                drive.range._set_value(value=e_range, measured=captured_at, unit=Length.KM)  # pylint: disable=protected-access
                 drive.range.precision = 1
 
             # Some flat-format datasets only provide a bare 'mileage' field.
@@ -723,6 +761,9 @@ class Connector(BaseConnector):
             if flat_mileage is not None and mileage is None:
                 vehicle.odometer._set_value(value=flat_mileage, measured=captured_at, unit=Length.KM)  # pylint: disable=protected-access
                 vehicle.odometer.precision = 1
+
+        if isinstance(vehicle, CombustionVehicle):
+            self._map_combustion(vehicle, dataset, captured_at)
 
     def _map_electric(self, vehicle: VWEudaElectricVehicle, dataset: Dataset,
                       captured_at: "Optional[datetime]") -> None:
@@ -897,6 +938,36 @@ class Connector(BaseConnector):
                 vehicle.lights.lights['parking'] = light
             light.light_state._set_value(Lights.LightState(light_code), measured=captured_at)  # pylint: disable=protected-access
             vehicle.lights.enabled = True
+
+    def _map_combustion(self, vehicle: "VWEudaVehicle", dataset: Dataset,
+                        captured_at: "Optional[datetime]") -> None:
+        """Map combustion-engine fields (fuel level, petrol range and consumption)."""
+        drive = vehicle.get_combustion_drive()
+        if drive is None:
+            drive = CombustionDrive(drive_id='combustion', drives=vehicle.drives,
+                                    initialization=vehicle.drives.get_initialization('combustion'))
+            drive.type._set_value(GenericDrive.Type.GASOLINE)  # pylint: disable=protected-access
+            vehicle.drives.add_drive(drive)
+
+        # Fuel level (%): prefer the dedicated current level, fall back to tank level.
+        fuel = dataset.value_of('fuel_level_current_level')
+        if fuel is None:
+            fuel = dataset.value_of('tank_current_level')
+        if isinstance(fuel, (int, float)):
+            drive.level._set_value(value=fuel, measured=captured_at)  # pylint: disable=protected-access
+            drive.level.precision = 1
+
+        # Petrol (combustion) range = the primary engine on a PHEV.
+        fuel_range = dataset.value_of('cruising_range_primary_engine')
+        if fuel_range is not None:
+            drive.range._set_value(value=fuel_range, measured=captured_at, unit=Length.KM)  # pylint: disable=protected-access
+            drive.range.precision = 1
+
+        # Average fuel consumption (long term): portal reports L/1000km, /10 -> L/100km.
+        consumption = dataset.value_of('long_term_data_average_fuel_consumption')
+        if isinstance(consumption, (int, float)):
+            drive.consumption._set_value(  # pylint: disable=protected-access
+                value=round(consumption / 10, 1), measured=captured_at, unit=FuelConsumption.L100KM)
 
     # -- scheduling --------------------------------------------------------
 

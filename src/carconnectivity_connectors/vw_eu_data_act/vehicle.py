@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from carconnectivity.vehicle import GenericVehicle, ElectricVehicle
+from carconnectivity.vehicle import GenericVehicle, ElectricVehicle, CombustionVehicle, HybridVehicle
 
 if TYPE_CHECKING:
     from typing import Optional, Dict
@@ -29,6 +29,30 @@ class VWEudaVehicle(GenericVehicle):
 
 class VWEudaElectricVehicle(ElectricVehicle, VWEudaVehicle):
     """A Volkswagen electric vehicle sourced from the EU Data Act portal."""
+
+    def __init__(self, vin: Optional[str] = None, garage: Optional[Garage] = None,
+                 managing_connector: Optional[BaseConnector] = None,
+                 origin: Optional[VWEudaVehicle] = None, initialization: Optional[Dict] = None) -> None:
+        if origin is not None:
+            super().__init__(garage=garage, origin=origin, initialization=initialization)
+        else:
+            super().__init__(vin=vin, garage=garage, managing_connector=managing_connector, initialization=initialization)
+
+
+class VWEudaCombustionVehicle(CombustionVehicle, VWEudaVehicle):
+    """A Volkswagen combustion vehicle sourced from the EU Data Act portal."""
+
+    def __init__(self, vin: Optional[str] = None, garage: Optional[Garage] = None,
+                 managing_connector: Optional[BaseConnector] = None,
+                 origin: Optional[VWEudaVehicle] = None, initialization: Optional[Dict] = None) -> None:
+        if origin is not None:
+            super().__init__(garage=garage, origin=origin, initialization=initialization)
+        else:
+            super().__init__(vin=vin, garage=garage, managing_connector=managing_connector, initialization=initialization)
+
+
+class VWEudaHybridVehicle(HybridVehicle, VWEudaVehicle):
+    """A Volkswagen plug-in hybrid (PHEV) sourced from the EU Data Act portal."""
 
     def __init__(self, vin: Optional[str] = None, garage: Optional[Garage] = None,
                  managing_connector: Optional[BaseConnector] = None,
