@@ -21,12 +21,13 @@ from datetime import datetime, timedelta, timezone
 
 from carconnectivity.errors import AuthenticationError, RetrievalError, TooManyRequestsError
 from carconnectivity.util import config_remove_credentials
-from carconnectivity.units import Length, Power, Speed, Temperature
+from carconnectivity.units import EnergyConsumption, Length, Power, Speed, Temperature
 from carconnectivity.attributes import DurationAttribute, EnumAttribute
 from carconnectivity.vehicle import GenericVehicle
 from carconnectivity.drive import ElectricDrive, GenericDrive
 from carconnectivity.battery import Battery
 from carconnectivity.charging import Charging
+from carconnectivity.charging_connector import ChargingConnector
 from carconnectivity.doors import Doors
 from carconnectivity.window_heating import WindowHeatings
 from carconnectivity.enums import ConnectionState
@@ -172,6 +173,13 @@ KNOWN_MAPPED_FIELDS: set[str] = {
     'outside_temperature',
     'remaining_climate_time',
     'remaining_climatisation_time',
+    # Flat-format charging + consumption (mapped in _map_electric).
+    'charging_state',
+    'charging_mode',
+    'plug_state',
+    'external_power_supply_state',
+    'remaining_charging_time',
+    'long_term_data_average_electr_engine_consumption',
 }
 
 
@@ -718,6 +726,56 @@ class Connector(BaseConnector):
         target_soc = dataset.value_of('settings.target_soc')
         if target_soc is not None:
             vehicle.charging.settings.target_level._set_value(value=target_soc, measured=captured_at)  # pylint: disable=protected-access
+
+        # --- Flat-format charging fields (eGolf / PHEV) ----------------------
+        # Mirror the dotted battery_state_report.* / charging_state_report.* fields
+        # above but use simple lower-case string enums; map them when the dotted
+        # variants are absent. Their values match the CarConnectivity enum values.
+        flat_state = dataset.value_of('charging_state')
+        if isinstance(flat_state, str) and charge_state is None:
+            try:
+                state_enum = Charging.ChargingState(flat_state.strip().lower())
+            except ValueError:
+                state_enum = Charging.ChargingState.UNKNOWN
+            vehicle.charging.state._set_value(state_enum, measured=captured_at)  # pylint: disable=protected-access
+
+        flat_mode = dataset.value_of('charging_mode')
+        if isinstance(flat_mode, str) and charge_type is None:
+            try:
+                type_enum = Charging.ChargingType(flat_mode.strip().lower())
+            except ValueError:
+                type_enum = Charging.ChargingType.UNKNOWN
+            vehicle.charging.type._set_value(type_enum, measured=captured_at)  # pylint: disable=protected-access
+
+        plug = dataset.value_of('plug_state')
+        if isinstance(plug, str):
+            try:
+                vehicle.charging.connector.connection_state._set_value(  # pylint: disable=protected-access
+                    ChargingConnector.ChargingConnectorConnectionState(plug.strip().lower()), measured=captured_at)
+            except ValueError:
+                pass
+
+        ext_power = dataset.value_of('external_power_supply_state')
+        if isinstance(ext_power, str):
+            try:
+                vehicle.charging.connector.external_power._set_value(  # pylint: disable=protected-access
+                    ChargingConnector.ExternalPower(ext_power.strip().lower()), measured=captured_at)
+            except ValueError:
+                pass
+
+        # Flat remaining charging time is in MINUTES; 65535 is the "no value" sentinel.
+        flat_remaining = dataset.value_of('remaining_charging_time')
+        if isinstance(flat_remaining, (int, float)) and 0 <= flat_remaining < 65535 and remaining is None:
+            anchor = captured_at or datetime.now(tz=timezone.utc)
+            vehicle.charging.estimated_date_reached._set_value(  # pylint: disable=protected-access
+                value=anchor + timedelta(minutes=flat_remaining), measured=captured_at)
+
+        # Average electric consumption (long term): portal reports kWh/1000km,
+        # divide by 10 for kWh/100km.
+        consumption = dataset.value_of('long_term_data_average_electr_engine_consumption')
+        if isinstance(consumption, (int, float)):
+            drive.consumption._set_value(  # pylint: disable=protected-access
+                value=round(consumption / 10, 1), measured=captured_at, unit=EnergyConsumption.KWH100KM)
 
     # -- scheduling --------------------------------------------------------
 

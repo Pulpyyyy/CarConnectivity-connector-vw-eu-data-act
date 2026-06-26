@@ -51,6 +51,25 @@ def test_decikelvin_to_celsius():
     assert decikelvin_to_celsius("oops") is None
 
 
+def test_flat_charging_values_map_to_carconnectivity_enums():
+    """The portal's flat charging strings must be valid CarConnectivity enum values."""
+    from carconnectivity.charging import Charging
+    from carconnectivity.charging_connector import ChargingConnector
+    from carconnectivity.units import EnergyConsumption
+
+    assert Charging.ChargingState("charging") is Charging.ChargingState.CHARGING
+    assert Charging.ChargingState("off") is Charging.ChargingState.OFF
+    assert Charging.ChargingType("ac") is Charging.ChargingType.AC
+    assert ChargingConnector.ChargingConnectorConnectionState("connected") \
+        is ChargingConnector.ChargingConnectorConnectionState.CONNECTED
+    assert ChargingConnector.ChargingConnectorConnectionState("disconnected") \
+        is ChargingConnector.ChargingConnectorConnectionState.DISCONNECTED
+    assert ChargingConnector.ExternalPower("available") is ChargingConnector.ExternalPower.AVAILABLE
+    assert EnergyConsumption.KWH100KM.value == "kWh/100km"
+    # long-term electric consumption: kWh/1000km -> kWh/100km
+    assert round(157 / 10, 1) == 15.7
+
+
 def test_dataset_parses_maintenance_and_climate_fields():
     ds = Dataset.from_json({"vin": "V", "Data": [
         {"key": "a", "dataFieldName": "maintenance_interval__time_until_inspection", "value": "-127"},
