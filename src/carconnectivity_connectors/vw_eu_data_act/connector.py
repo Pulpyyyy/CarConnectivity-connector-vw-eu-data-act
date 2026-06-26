@@ -189,7 +189,10 @@ KNOWN_MAPPED_FIELDS: set[str] = {
     'tank_current_level',
     'long_term_data_average_fuel_consumption',
     'cruising_range_secondary_engine',
+    'scr_range',
     # Door / window / light status (mapped in _map_status).
+    'window_heating_state_front',
+    'window_heating_state_rear',
     'lock_state',
     'parking_lights',
     'open_state_front_left_door', 'open_state_front_right_door',
@@ -939,6 +942,26 @@ class Connector(BaseConnector):
             light.light_state._set_value(Lights.LightState(light_code), measured=captured_at)  # pylint: disable=protected-access
             vehicle.lights.enabled = True
 
+        # Per-window heating (front / rear); the flat fields carry "on" / "off".
+        for window_id, field in (('front', 'window_heating_state_front'),
+                                  ('rear', 'window_heating_state_rear')):
+            wh = dataset.value_of(field)
+            if not isinstance(wh, str):
+                continue
+            try:
+                state = WindowHeatings.HeatingState(wh.strip().lower())
+            except ValueError:
+                state = WindowHeatings.HeatingState.UNKNOWN
+            heater = vehicle.window_heatings.windows.get(window_id)
+            if heater is None:
+                heater = WindowHeatings.WindowHeating(window_id=window_id,
+                                                      window_heatings=vehicle.window_heatings)
+                heater.enabled = True
+                vehicle.window_heatings.windows[window_id] = heater
+            heater.heating_state._set_value(state, measured=captured_at)  # pylint: disable=protected-access
+        if vehicle.window_heatings.windows:
+            vehicle.window_heatings.enabled = True
+
     def _map_combustion(self, vehicle: "VWEudaVehicle", dataset: Dataset,
                         captured_at: "Optional[datetime]") -> None:
         """Map combustion-engine fields (fuel level, petrol range and consumption)."""
@@ -968,6 +991,13 @@ class Connector(BaseConnector):
         if isinstance(consumption, (int, float)):
             drive.consumption._set_value(  # pylint: disable=protected-access
                 value=round(consumption / 10, 1), measured=captured_at, unit=FuelConsumption.L100KM)
+
+        # SCR / AdBlue range (diesel only; empty on petrol / PHEV).
+        adblue_range = dataset.value_of('scr_range')
+        if isinstance(adblue_range, (int, float)):
+            drive.adblue_range._set_value(  # pylint: disable=protected-access
+                value=adblue_range, measured=captured_at, unit=Length.KM)
+            drive.adblue_range.precision = 1
 
     # -- scheduling --------------------------------------------------------
 
