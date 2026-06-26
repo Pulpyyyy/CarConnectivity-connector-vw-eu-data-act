@@ -70,6 +70,29 @@ def test_flat_charging_values_map_to_carconnectivity_enums():
     assert round(157 / 10, 1) == 15.7
 
 
+def test_door_window_light_decoding():
+    """Portal open/lock/light codes decode to valid CarConnectivity enum values."""
+    from carconnectivity.doors import Doors
+    from carconnectivity.windows import Windows
+    from carconnectivity.lights import Lights
+    from carconnectivity_connectors.vw_eu_data_act.connector import (
+        _light_code, _lock_code, _open_code,
+    )
+
+    # open encoding: 2 = open/active, 3 = closed/inactive, 0/1 = invalid
+    assert _open_code(2) == 'open' and _open_code(3) == 'closed'
+    assert _open_code(0) is None and _open_code(1) is None
+    assert _lock_code(2) == 'locked' and _lock_code(3) == 'unlocked'
+    # lights encoding: 2 = off, 3/4/5 = on, 0/1 = invalid
+    assert _light_code(2) == 'off' and _light_code(3) == 'on' and _light_code(5) == 'on'
+    assert _light_code(1) is None
+    # decoded strings are valid enum values
+    assert Doors.OpenState(_open_code(3)) is Doors.OpenState.CLOSED
+    assert Doors.LockState(_lock_code(2)) is Doors.LockState.LOCKED
+    assert Windows.OpenState(_open_code(2)) is Windows.OpenState.OPEN
+    assert Lights.LightState(_light_code(2)) is Lights.LightState.OFF
+
+
 def test_dataset_parses_maintenance_and_climate_fields():
     ds = Dataset.from_json({"vin": "V", "Data": [
         {"key": "a", "dataFieldName": "maintenance_interval__time_until_inspection", "value": "-127"},

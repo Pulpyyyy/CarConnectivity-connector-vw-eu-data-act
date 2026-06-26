@@ -29,6 +29,8 @@ from carconnectivity.battery import Battery
 from carconnectivity.charging import Charging
 from carconnectivity.charging_connector import ChargingConnector
 from carconnectivity.doors import Doors
+from carconnectivity.windows import Windows
+from carconnectivity.lights import Lights
 from carconnectivity.window_heating import WindowHeatings
 from carconnectivity.enums import ConnectionState
 
@@ -180,7 +182,68 @@ KNOWN_MAPPED_FIELDS: set[str] = {
     'external_power_supply_state',
     'remaining_charging_time',
     'long_term_data_average_electr_engine_consumption',
+    # Door / window / light status (mapped in _map_status).
+    'lock_state',
+    'parking_lights',
+    'open_state_front_left_door', 'open_state_front_right_door',
+    'open_state_rear_left_door', 'open_state_rear_right_door',
+    'open_state_front_engine_bonnet', 'open_state_tailgate',
+    'locked_state_front_left_door', 'locked_state_front_right_door',
+    'locked_state__rear_left_door', 'locked_state_rear_right_door',
+    'locked_state_front_engine_bonnet', 'locked_state_tailgate',
+    'state_front_left_door_window_lifter', 'state_front_right_door_window_lifter',
+    'state_rear_left_door_window_lifter', 'state_rear_right_door_window_lifter',
+    'state_sunroof_motor_hood_1',
 }
+
+# Portal door id -> (open_state field, locked_state field). Note the double
+# underscore in the rear-left lock field (portal quirk).
+_DOOR_FIELDS: "Dict[str, Tuple[str, str]]" = {
+    'front_left': ('open_state_front_left_door', 'locked_state_front_left_door'),
+    'front_right': ('open_state_front_right_door', 'locked_state_front_right_door'),
+    'rear_left': ('open_state_rear_left_door', 'locked_state__rear_left_door'),
+    'rear_right': ('open_state_rear_right_door', 'locked_state_rear_right_door'),
+    'bonnet': ('open_state_front_engine_bonnet', 'locked_state_front_engine_bonnet'),
+    'tailgate': ('open_state_tailgate', 'locked_state_tailgate'),
+}
+
+# Portal window id -> open/closed state field.
+_WINDOW_FIELDS: "Dict[str, str]" = {
+    'front_left': 'state_front_left_door_window_lifter',
+    'front_right': 'state_front_right_door_window_lifter',
+    'rear_left': 'state_rear_left_door_window_lifter',
+    'rear_right': 'state_rear_right_door_window_lifter',
+    'sunroof': 'state_sunroof_motor_hood_1',
+}
+
+
+def _open_code(value) -> "Optional[str]":
+    """Decode the portal 'open' encoding: 2 = open, 3 = closed, 0/1 = invalid."""
+    if value == 2:
+        return 'open'
+    if value == 3:
+        return 'closed'
+    return None
+
+
+def _lock_code(value) -> "Optional[str]":
+    """Decode the portal 'open' encoding for locks: 2 = locked, 3 = unlocked."""
+    if value == 2:
+        return 'locked'
+    if value == 3:
+        return 'unlocked'
+    return None
+
+
+def _light_code(value) -> "Optional[str]":
+    """Decode the portal 'lights' encoding: 2 = off, 3/4/5 = on, 0/1 = invalid."""
+    if value in (0, 1):
+        return None
+    if value == 2:
+        return 'off'
+    if value in (3, 4, 5):
+        return 'on'
+    return None
 
 
 class Connector(BaseConnector):
@@ -630,6 +693,9 @@ class Connector(BaseConnector):
             vehicle.climatization.estimated_date_reached._set_value(  # pylint: disable=protected-access
                 value=date_anchor + timedelta(minutes=clim_minutes), measured=captured_at)
 
+        # Doors, windows and lights status (applies to all vehicles).
+        self._map_status(vehicle, dataset, captured_at)
+
         if isinstance(vehicle, VWEudaElectricVehicle):
             self._map_electric(vehicle, dataset, captured_at)
 
@@ -776,6 +842,61 @@ class Connector(BaseConnector):
         if isinstance(consumption, (int, float)):
             drive.consumption._set_value(  # pylint: disable=protected-access
                 value=round(consumption / 10, 1), measured=captured_at, unit=EnergyConsumption.KWH100KM)
+
+    def _map_status(self, vehicle: "VWEudaVehicle", dataset: Dataset,
+                    captured_at: "Optional[datetime]") -> None:
+        """Map per-door / per-window open+lock state and lights onto CarConnectivity."""
+        # Overall central lock (flat string field).
+        lock = dataset.value_of('lock_state')
+        if isinstance(lock, str):
+            text = lock.strip().lower()
+            if text == 'locked':
+                vehicle.doors.lock_state._set_value(Doors.LockState.LOCKED, measured=captured_at)  # pylint: disable=protected-access
+            elif text == 'unlocked':
+                vehicle.doors.lock_state._set_value(Doors.LockState.UNLOCKED, measured=captured_at)  # pylint: disable=protected-access
+
+        # Per-door open + lock state.
+        for door_id, (open_f, lock_f) in _DOOR_FIELDS.items():
+            open_code = _open_code(dataset.value_of(open_f))
+            lock_code = _lock_code(dataset.value_of(lock_f))
+            if open_code is None and lock_code is None:
+                continue
+            door = vehicle.doors.doors.get(door_id)
+            if door is None:
+                door = Doors.Door(door_id=door_id, doors=vehicle.doors)
+                door.enabled = True
+                vehicle.doors.doors[door_id] = door
+            if open_code is not None:
+                door.open_state._set_value(Doors.OpenState(open_code), measured=captured_at)  # pylint: disable=protected-access
+            if lock_code is not None:
+                door.lock_state._set_value(Doors.LockState(lock_code), measured=captured_at)  # pylint: disable=protected-access
+        if vehicle.doors.doors:
+            vehicle.doors.enabled = True
+
+        # Per-window open state.
+        for window_id, state_f in _WINDOW_FIELDS.items():
+            open_code = _open_code(dataset.value_of(state_f))
+            if open_code is None:
+                continue
+            window = vehicle.windows.windows.get(window_id)
+            if window is None:
+                window = Windows.Window(window_id=window_id, windows=vehicle.windows)
+                window.enabled = True
+                vehicle.windows.windows[window_id] = window
+            window.open_state._set_value(Windows.OpenState(open_code), measured=captured_at)  # pylint: disable=protected-access
+        if vehicle.windows.windows:
+            vehicle.windows.enabled = True
+
+        # Parking lights.
+        light_code = _light_code(dataset.value_of('parking_lights'))
+        if light_code is not None:
+            light = vehicle.lights.lights.get('parking')
+            if light is None:
+                light = Lights.Light(light_id='parking', lights=vehicle.lights)
+                light.enabled = True
+                vehicle.lights.lights['parking'] = light
+            light.light_state._set_value(Lights.LightState(light_code), measured=captured_at)  # pylint: disable=protected-access
+            vehicle.lights.enabled = True
 
     # -- scheduling --------------------------------------------------------
 
