@@ -24,7 +24,7 @@ from carconnectivity.util import config_remove_credentials
 from carconnectivity.units import EnergyConsumption, FuelConsumption, Length, Power, Speed, Temperature
 from carconnectivity.attributes import DurationAttribute, EnumAttribute
 from carconnectivity.vehicle import GenericVehicle, ElectricVehicle, CombustionVehicle
-from carconnectivity.drive import CombustionDrive, ElectricDrive, GenericDrive
+from carconnectivity.drive import CombustionDrive, DieselDrive, ElectricDrive, GenericDrive
 from carconnectivity.battery import Battery
 from carconnectivity.charging import Charging
 from carconnectivity.charging_connector import ChargingConnector
@@ -1007,13 +1007,25 @@ class Connector(BaseConnector):
     def _map_combustion(self, vehicle: "VWEudaVehicle", dataset: Dataset,
                         captured_at: "Optional[datetime]") -> None:
         """Map combustion-engine fields (fuel level, petrol range and consumption)."""
+        # The portal has no fuel-type field, so infer a diesel from a *numeric* SCR
+        # (AdBlue) range: petrol/PHEV cars also carry the scr_range field but report
+        # it as an empty string. A diesel needs a DieselDrive because adblue_range
+        # only exists there (a plain CombustionDrive would raise AttributeError).
+        adblue_range = dataset.value_of('scr_range')
+        is_diesel = isinstance(adblue_range, (int, float))
+
         # The combustion engine is the portal's primary engine (matching the
         # seatcupra convention where the primary slot is the fuel engine on a PHEV).
         drive = vehicle.get_combustion_drive()
         if drive is None:
-            drive = CombustionDrive(drive_id='primary', drives=vehicle.drives,
+            if is_diesel:
+                drive = DieselDrive(drive_id='primary', drives=vehicle.drives,
                                     initialization=vehicle.drives.get_initialization('primary'))
-            drive.type._set_value(GenericDrive.Type.GASOLINE)  # pylint: disable=protected-access
+                drive.type._set_value(GenericDrive.Type.DIESEL)  # pylint: disable=protected-access
+            else:
+                drive = CombustionDrive(drive_id='primary', drives=vehicle.drives,
+                                        initialization=vehicle.drives.get_initialization('primary'))
+                drive.type._set_value(GenericDrive.Type.GASOLINE)  # pylint: disable=protected-access
             vehicle.drives.add_drive(drive)
 
         # Fuel level (%): prefer the dedicated current level, fall back to tank level.
@@ -1036,9 +1048,9 @@ class Connector(BaseConnector):
             drive.consumption._set_value(  # pylint: disable=protected-access
                 value=round(consumption / 10, 1), measured=captured_at, unit=FuelConsumption.L100KM)
 
-        # SCR / AdBlue range (diesel only; empty on petrol / PHEV).
-        adblue_range = dataset.value_of('scr_range')
-        if isinstance(adblue_range, (int, float)):
+        # SCR / AdBlue range (diesel only; empty on petrol / PHEV). adblue_range
+        # exists only on DieselDrive, so guard exactly like the official connectors.
+        if is_diesel and isinstance(drive, DieselDrive):
             drive.adblue_range._set_value(  # pylint: disable=protected-access
                 value=adblue_range, measured=captured_at, unit=Length.KM)
             drive.adblue_range.precision = 1

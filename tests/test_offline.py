@@ -727,6 +727,46 @@ def test_pure_ev_stays_electric_not_hybrid(connector):
     assert v.get_electric_drive().level.value == 69
 
 
+def test_diesel_creates_dieseldrive_and_maps_adblue(connector):
+    """A diesel dataset (numeric scr_range) must create a DieselDrive, because
+    adblue_range exists only there. Writing it on a plain CombustionDrive (the
+    previous behaviour) raised AttributeError on real diesels."""
+    from carconnectivity.drive import DieselDrive
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "a", "dataFieldName": "fuel_level_current_level", "value": "60"},
+        {"key": "b", "dataFieldName": "cruising_range_primary_engine", "value": "700"},
+        {"key": "c", "dataFieldName": "scr_range", "value": "9000"},
+    ]})
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+
+    drive = garage.get_vehicle(VIN).get_combustion_drive()
+    assert isinstance(drive, DieselDrive)
+    assert str(drive.type.value) == "Type.DIESEL"
+    assert drive.adblue_range.value == 9000
+    assert drive.adblue_range.unit == Length.KM
+
+
+def test_petrol_empty_scr_range_stays_combustion_no_crash(connector):
+    """Petrol/PHEV cars also carry the scr_range field but report it as an empty
+    string. That must NOT be read as diesel (no DieselDrive) and must not raise."""
+    from carconnectivity.drive import CombustionDrive, DieselDrive
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "a", "dataFieldName": "fuel_level_current_level", "value": "37"},
+        {"key": "b", "dataFieldName": "cruising_range_primary_engine", "value": "210"},
+        {"key": "c", "dataFieldName": "scr_range", "value": ""},
+    ]})
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+
+    drive = garage.get_vehicle(VIN).get_combustion_drive()
+    assert isinstance(drive, CombustionDrive)
+    assert not isinstance(drive, DieselDrive)
+    assert str(drive.type.value) == "Type.GASOLINE"
+
+
 PHEV_SAMPLE = os.path.join(os.path.dirname(__file__), "phev_sample_dataset.json")
 
 
