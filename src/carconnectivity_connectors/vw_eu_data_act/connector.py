@@ -739,8 +739,8 @@ class Connector(BaseConnector):
 
             drive = vehicle.get_electric_drive()
             if drive is None:
-                drive = ElectricDrive(drive_id='primary', drives=vehicle.drives,
-                                      initialization=vehicle.drives.get_initialization('primary'))
+                drive = ElectricDrive(drive_id='electric', drives=vehicle.drives,
+                                      initialization=vehicle.drives.get_initialization('electric'))
                 drive.type._set_value(GenericDrive.Type.ELECTRIC)  # pylint: disable=protected-access
                 vehicle.drives.add_drive(drive)
 
@@ -773,8 +773,8 @@ class Connector(BaseConnector):
         """Map EV-specific fields (SoC, charging, battery temps, range)."""
         drive = vehicle.get_electric_drive()
         if drive is None:
-            drive = ElectricDrive(drive_id='primary', drives=vehicle.drives,
-                                  initialization=vehicle.drives.get_initialization('primary'))
+            drive = ElectricDrive(drive_id='electric', drives=vehicle.drives,
+                                  initialization=vehicle.drives.get_initialization('electric'))
             drive.type._set_value(GenericDrive.Type.ELECTRIC)  # pylint: disable=protected-access
             vehicle.drives.add_drive(drive)
 
