@@ -826,6 +826,34 @@ def test_oil_level_mapped_when_core_supports_it(connector):
     assert drive.oil_level.value == 87.5
 
 
+def test_parking_brake_mapped_when_core_supports_it(connector):
+    """parking_brake 1/0 maps to vehicle.parking_brake True/False, when the core
+    exposes the attribute (hasattr-guarded; skips on an older core)."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    connector._map_dataset(VIN, Dataset.from_json({"vin": VIN, "Data": [  # pylint: disable=protected-access
+        {"key": "k1", "dataFieldName": "parking_brake", "value": "1"},
+    ]}))
+    v = garage.get_vehicle(VIN)
+    if not hasattr(v, "parking_brake"):
+        pytest.skip("installed carconnectivity core has no parking_brake attribute yet")
+    assert v.parking_brake.value is True
+
+    connector._map_dataset(VIN, Dataset.from_json({"vin": VIN, "Data": [  # pylint: disable=protected-access
+        {"key": "k1", "dataFieldName": "parking_brake", "value": "0"},
+    ]}))
+    assert garage.get_vehicle(VIN).parking_brake.value is False
+
+
+def test_parking_brake_does_not_crash_on_older_core(connector):
+    """Mapping parking_brake must not raise even without the core attribute."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    connector._map_dataset(VIN, Dataset.from_json({"vin": VIN, "Data": [  # pylint: disable=protected-access
+        {"key": "k1", "dataFieldName": "parking_brake", "value": "1"},
+    ]}))  # must not raise
+
+
 def test_oil_level_does_not_crash_on_older_core(connector):
     """Even without oil_level in the core, mapping an oil dataset must not raise."""
     garage = connector.car_connectivity.garage
