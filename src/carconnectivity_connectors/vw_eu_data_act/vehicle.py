@@ -51,7 +51,7 @@ class VWEudaCombustionVehicle(CombustionVehicle, VWEudaVehicle):
             super().__init__(vin=vin, garage=garage, managing_connector=managing_connector, initialization=initialization)
 
 
-class VWEudaHybridVehicle(HybridVehicle, VWEudaVehicle):
+class VWEudaHybridVehicle(HybridVehicle, VWEudaElectricVehicle, VWEudaCombustionVehicle):
     """A Volkswagen plug-in hybrid (PHEV) sourced from the EU Data Act portal."""
 
     def __init__(self, vin: Optional[str] = None, garage: Optional[Garage] = None,

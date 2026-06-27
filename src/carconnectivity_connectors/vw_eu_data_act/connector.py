@@ -189,6 +189,7 @@ KNOWN_MAPPED_FIELDS: set[str] = {
     'tank_current_level',
     'long_term_data_average_fuel_consumption',
     'cruising_range_secondary_engine',
+    'cruising_range_combined',
     'scr_range',
     # Door / window / light status (mapped in _map_status).
     'window_heating_state_front',
@@ -772,6 +773,13 @@ class Connector(BaseConnector):
 
         if isinstance(vehicle, CombustionVehicle):
             self._map_combustion(vehicle, dataset, captured_at)
+
+        # Combined (total) range across all drives, when the portal reports it
+        # directly (the seatcupra connector instead sums the per-engine ranges).
+        combined = dataset.value_of('cruising_range_combined')
+        if combined is not None:
+            vehicle.drives.total_range._set_value(value=combined, measured=captured_at, unit=Length.KM)  # pylint: disable=protected-access
+            vehicle.drives.total_range.precision = 1
 
     def _map_electric(self, vehicle: VWEudaElectricVehicle, dataset: Dataset,
                       captured_at: "Optional[datetime]", drive_id: str = 'primary') -> None:
