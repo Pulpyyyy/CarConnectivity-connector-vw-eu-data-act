@@ -734,13 +734,18 @@ class Connector(BaseConnector):
         # Doors, windows and lights status (applies to all vehicles).
         self._map_status(vehicle, dataset, captured_at)
 
+        # Drive slots follow the portal's primary/secondary engines (same convention
+        # as the official seatcupra connector): on a PHEV the primary engine is the
+        # combustion one and the secondary is electric; a pure EV has only the
+        # primary (electric) slot.
+        electric_drive_id = 'secondary' if is_phev else 'primary'
         if isinstance(vehicle, ElectricVehicle):
-            self._map_electric(vehicle, dataset, captured_at)
+            self._map_electric(vehicle, dataset, captured_at, electric_drive_id)
 
             drive = vehicle.get_electric_drive()
             if drive is None:
-                drive = ElectricDrive(drive_id='electric', drives=vehicle.drives,
-                                      initialization=vehicle.drives.get_initialization('electric'))
+                drive = ElectricDrive(drive_id=electric_drive_id, drives=vehicle.drives,
+                                      initialization=vehicle.drives.get_initialization(electric_drive_id))
                 drive.type._set_value(GenericDrive.Type.ELECTRIC)  # pylint: disable=protected-access
                 vehicle.drives.add_drive(drive)
 
@@ -769,12 +774,12 @@ class Connector(BaseConnector):
             self._map_combustion(vehicle, dataset, captured_at)
 
     def _map_electric(self, vehicle: VWEudaElectricVehicle, dataset: Dataset,
-                      captured_at: "Optional[datetime]") -> None:
+                      captured_at: "Optional[datetime]", drive_id: str = 'primary') -> None:
         """Map EV-specific fields (SoC, charging, battery temps, range)."""
         drive = vehicle.get_electric_drive()
         if drive is None:
-            drive = ElectricDrive(drive_id='electric', drives=vehicle.drives,
-                                  initialization=vehicle.drives.get_initialization('electric'))
+            drive = ElectricDrive(drive_id=drive_id, drives=vehicle.drives,
+                                  initialization=vehicle.drives.get_initialization(drive_id))
             drive.type._set_value(GenericDrive.Type.ELECTRIC)  # pylint: disable=protected-access
             vehicle.drives.add_drive(drive)
 
@@ -965,10 +970,12 @@ class Connector(BaseConnector):
     def _map_combustion(self, vehicle: "VWEudaVehicle", dataset: Dataset,
                         captured_at: "Optional[datetime]") -> None:
         """Map combustion-engine fields (fuel level, petrol range and consumption)."""
+        # The combustion engine is the portal's primary engine (matching the
+        # seatcupra convention where the primary slot is the fuel engine on a PHEV).
         drive = vehicle.get_combustion_drive()
         if drive is None:
-            drive = CombustionDrive(drive_id='combustion', drives=vehicle.drives,
-                                    initialization=vehicle.drives.get_initialization('combustion'))
+            drive = CombustionDrive(drive_id='primary', drives=vehicle.drives,
+                                    initialization=vehicle.drives.get_initialization('primary'))
             drive.type._set_value(GenericDrive.Type.GASOLINE)  # pylint: disable=protected-access
             vehicle.drives.add_drive(drive)
 
