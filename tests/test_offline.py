@@ -725,3 +725,38 @@ def test_pure_ev_stays_electric_not_hybrid(connector):
     v = garage.get_vehicle(VIN)
     assert not isinstance(v, CombustionVehicle)
     assert v.get_electric_drive().level.value == 69
+
+
+PHEV_SAMPLE = os.path.join(os.path.dirname(__file__), "phev_sample_dataset.json")
+
+
+def test_phev_real_world_sample(connector):
+    """Full mapping against an anonymised real flat SEAT Leon PHEV dataset."""
+    from carconnectivity.vehicle import HybridVehicle
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    payload = json.load(open(PHEV_SAMPLE, "r", encoding="utf-8"))
+    payload["vin"] = VIN
+    connector._map_dataset(VIN, Dataset.from_json(payload))
+    v = garage.get_vehicle(VIN)
+
+    assert isinstance(v, HybridVehicle)
+    # primary slot = petrol (combustion), secondary = electric (seatcupra convention)
+    primary = v.drives.drives["primary"]
+    secondary = v.drives.drives["secondary"]
+    assert str(primary.type.value) == "Type.GASOLINE"
+    assert str(secondary.type.value) == "Type.ELECTRIC"
+    assert primary.range.value == 210 and primary.level.value == 37        # petrol
+    assert secondary.range.value == 11 and secondary.level.value == 25     # electric
+    assert primary.consumption.value == 1.4                               # L/100km
+    assert secondary.consumption.value == 16.0                            # kWh/100km
+    # vehicle-level
+    assert v.odometer.value == 40208
+    assert v.outside_temperature.value == 39.0
+    # status objects populated
+    assert len(v.doors.doors) == 6
+    assert v.doors.doors["front_right"].open_state.value.value == "open"
+    assert len(v.windows.windows) == 5
+    assert v.lights.lights["parking"].light_state.value.value == "off"
+    # maintenance distance preserved
+    assert v.maintenance.inspection_due_after.value == 23500
