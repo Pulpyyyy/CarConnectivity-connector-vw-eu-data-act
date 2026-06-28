@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from carconnectivity.errors import AuthenticationError, RetrievalError, TooManyRequestsError
 from carconnectivity.util import config_remove_credentials
 from carconnectivity.units import EnergyConsumption, FuelConsumption, Length, Power, Speed, Temperature
-from carconnectivity.attributes import DurationAttribute, EnumAttribute
+from carconnectivity.attributes import DateAttribute, DurationAttribute, EnumAttribute
 from carconnectivity.vehicle import GenericVehicle, ElectricVehicle, CombustionVehicle
 from carconnectivity.drive import CombustionDrive, DieselDrive, ElectricDrive, GenericDrive
 from carconnectivity.battery import Battery
@@ -699,6 +699,19 @@ class Connector(BaseConnector):
             garage.replace_vehicle(vin, vehicle)
             vehicle.type._set_value(desired_type)  # pylint: disable=protected-access
         is_phev = has_electric and has_fuel
+
+        # Dataset freshness, exposed PER VEHICLE: one connector serves several VINs,
+        # each with its own capture time, so this cannot live on the connector. It is
+        # (re)created lazily on the current instance because the promotion above swaps
+        # in a subclass that does not carry custom attributes over. The base MQTT
+        # plugin auto-publishes it, so it can back a `device_class: timestamp` sensor.
+        if captured_at is not None:
+            cap_attr = getattr(vehicle, 'captured_at', None)
+            if not isinstance(cap_attr, DateAttribute):
+                cap_attr = DateAttribute(name='captured_at', parent=vehicle, tags={'connector_custom'})
+                vehicle.captured_at = cap_attr
+            if cap_attr.value is None or captured_at > cap_attr.value:
+                cap_attr._set_value(value=captured_at)  # pylint: disable=protected-access
 
         # Odometer (mileage.value). The portal reports km or miles depending on
         # the vehicle; the unit comes from the companion mileage.unit enum, with
