@@ -153,6 +153,10 @@ KNOWN_MAPPED_FIELDS: set[str] = {
     'mileage.value',
     'mileage.unit',
     'mileage.state',
+    # Bare leaves carrying no meaning in their name: handled by key instead
+    # (see KEY_PRIMARY_RANGE below), so they must not be reported as unmapped.
+    'value',
+    'unit',
     'locked',
     'window_heating_state',
     'battery_state_report.soc',
@@ -232,6 +236,17 @@ KNOWN_MAPPED_FIELDS: set[str] = {
 KNOWN_MAPPED_PREFIXES: "Tuple[str, ...]" = (
     'energy_contents.maximal_energy_content',
 )
+
+# --- datapoints identified by their portal key only ------------------------
+# A handful of datapoints reach the flat export with a semantically empty
+# ``dataFieldName`` (a bare ``value`` / ``unit``), so the name cannot be mapped;
+# the official data dictionary identifies them by key instead. Those keys are
+# name-based UUIDs (version 3), i.e. a deterministic hash of the field identity,
+# and are therefore stable across vehicles. Descriptions below are quoted from
+# the dictionary. Reported by users whose vehicle sends no named range field
+# (upstream issues #12 and #33).
+KEY_PRIMARY_RANGE = '0ca40e18-0564-3eda-bcc0-7aee9ef44f04'       # "Value of the primary range"
+KEY_PRIMARY_RANGE_UNIT = '8d508462-17e7-3027-8980-cbbbc86d9496'  # "Unit of the value; type DistanceUnit"
 
 # Portal door id -> (open_state field, locked_state field). Note the double
 # underscore in the rear-left lock field (portal quirk).
@@ -991,8 +1006,21 @@ class Connector(BaseConnector):
             # it is reported as the primary engine.
             e_range = dataset.value_of('cruising_range_secondary_engine') if is_phev \
                 else dataset.value_of('cruising_range_primary_engine')
+            e_range_unit = Length.KM
+            if e_range is None and not isinstance(vehicle, CombustionVehicle):
+                # Some vehicles deliver no named range field at all: the range
+                # arrives as a bare 'value' datapoint that only its key
+                # identifies (issue #33). That key holds the *primary* range,
+                # which on anything with a combustion engine is the fuel one,
+                # so it is only trusted for a pure EV. Testing the promoted
+                # vehicle class rather than this dataset's is_phev matters: a
+                # hybrid whose snapshot happens to carry no fuel field would
+                # otherwise have its fuel range published as electric range.
+                e_range = dataset.value_by_key(KEY_PRIMARY_RANGE)
+                if resolve_distance_unit(dataset.value_by_key(KEY_PRIMARY_RANGE_UNIT)) == 'mi':
+                    e_range_unit = Length.MI
             if e_range is not None:
-                drive.range._set_value(value=e_range, measured=captured_at, unit=Length.KM)  # pylint: disable=protected-access
+                drive.range._set_value(value=e_range, measured=captured_at, unit=e_range_unit)  # pylint: disable=protected-access
                 drive.range.precision = 1
 
             # Some flat-format datasets only provide a bare 'mileage' field.
