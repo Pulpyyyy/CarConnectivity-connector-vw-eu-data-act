@@ -330,6 +330,23 @@ class Dataset:
         dp = self.by_field(field_name)
         return dp.value if dp is not None else None
 
+    def by_key(self, key: str) -> Optional[DataPoint]:
+        """Return the data point carrying a specific portal key (UUID).
+
+        A few datapoints reach the flat export with a semantically empty
+        ``dataFieldName`` (a bare ``value`` / ``unit``); only their key tells
+        them apart, and the official data dictionary is indexed by that key.
+        Keys are stable across vehicles: the vast majority are name-based
+        UUIDs (version 3), i.e. a deterministic hash of the field identity
+        rather than a per-vehicle or per-report identifier.
+        """
+        return self.points.get(key)
+
+    def value_by_key(self, key: str):
+        """Return the typed value of the point with ``key`` or ``None``."""
+        dp = self.by_key(key)
+        return dp.value if dp is not None else None
+
     def freshest_numeric_by_prefix(self, prefix: str):
         """Return a numeric value among fields whose name starts with ``prefix``.
 

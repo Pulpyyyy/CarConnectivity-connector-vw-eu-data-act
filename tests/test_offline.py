@@ -25,6 +25,7 @@ from carconnectivity_connectors.vw_eu_data_act.client import ApiError, AuthError
 from carconnectivity_connectors.vw_eu_data_act.connector import (
     Connector, _filename_timestamp, KNOWN_MAPPED_FIELDS,
     _charge_mode, _charge_mode_flat, VWEudaChargeMode,
+    KEY_PRIMARY_RANGE, KEY_PRIMARY_RANGE_UNIT,
 )
 from carconnectivity_connectors.vw_eu_data_act.dataset import Dataset
 from carconnectivity_connectors.vw_eu_data_act.vehicle import VWEudaElectricVehicle, VWEudaVehicle
@@ -1273,3 +1274,104 @@ def test_login_probe_tolerates_portal_hiccup():
     client = _client_with_probe(500)
     resp = _FakeResp(PORTAL + "/si/sl/user.html", status_code=200, history=[_callback_hop()])
     client._finish_login(resp)  # pylint: disable=protected-access
+
+
+# --- datapoints identified by key only (issues #12 / #33) --------------------
+
+def test_dataset_lookup_by_key():
+    """Datapoints whose dataFieldName carries no meaning must be reachable by
+    their portal key."""
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": KEY_PRIMARY_RANGE, "dataFieldName": "value", "value": "386"},
+        {"key": "57b433c8-3dcc-3fbf-9b38-74f8f6480682", "dataFieldName": "value", "value": "7"},
+    ]})
+
+    assert ds.value_by_key(KEY_PRIMARY_RANGE) == 386
+    assert ds.by_key(KEY_PRIMARY_RANGE).field_name == "value"
+    assert ds.value_by_key("no-such-key") is None
+
+
+def test_range_by_key_when_no_named_field(connector):
+    """An ID.4 reporting no cruising_range_* field at all delivers the range as
+    a bare 'value' datapoint identified only by its key (issue #33): it must
+    still reach drive.range."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaElectricVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "ae0294b4-1286-3e98-a818-1485b8d88430", "dataFieldName": "state_of_charge",
+         "value": "80"},
+        {"key": KEY_PRIMARY_RANGE, "dataFieldName": "value", "value": "386"},
+    ]})
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+
+    drive = garage.get_vehicle(VIN).get_electric_drive()
+    assert drive.range.value == 386
+    assert drive.range.unit == Length.KM
+
+
+def test_range_by_key_honours_companion_unit(connector):
+    """The bare range has a companion 'unit' datapoint, also key-identified."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaElectricVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "ae0294b4-1286-3e98-a818-1485b8d88430", "dataFieldName": "state_of_charge",
+         "value": "80"},
+        {"key": KEY_PRIMARY_RANGE, "dataFieldName": "value", "value": "240"},
+        {"key": KEY_PRIMARY_RANGE_UNIT, "dataFieldName": "unit", "value": "MILES"},
+    ]})
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+
+    assert garage.get_vehicle(VIN).get_electric_drive().range.unit == Length.MI
+
+
+def test_named_range_field_wins_over_key(connector):
+    """The by-key lookup is a fallback: a vehicle sending the named field keeps
+    using it."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaElectricVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "ae0294b4-1286-3e98-a818-1485b8d88430", "dataFieldName": "state_of_charge",
+         "value": "80"},
+        {"key": "55e0d40b-38ed-3cb5-9dcd-6193df6fc493",
+         "dataFieldName": "cruising_range_primary_engine", "value": "300"},
+        {"key": KEY_PRIMARY_RANGE, "dataFieldName": "value", "value": "999"},
+    ]})
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+
+    assert garage.get_vehicle(VIN).get_electric_drive().range.value == 300
+
+
+def test_range_key_ignored_on_phev(connector):
+    """The key holds the *primary* range, which is the combustion one as soon
+    as there is an engine: it must never be pushed onto the electric drive of a
+    hybrid, including on a snapshot that carries no fuel field of its own."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaElectricVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    # First snapshot establishes the hybrid drivetrain (electric + fuel).
+    connector._map_dataset(VIN, Dataset.from_json({"vin": VIN, "Data": [  # pylint: disable=protected-access
+        {"key": "ae0294b4-1286-3e98-a818-1485b8d88430", "dataFieldName": "state_of_charge",
+         "value": "80"},
+        {"key": "f1000000-0000-0000-0000-000000000001",
+         "dataFieldName": "fuel_level_current_level", "value": "33"},
+    ]}))
+
+    # A later snapshot without any named range must NOT publish the primary
+    # (fuel) range as the electric one.
+    connector._map_dataset(VIN, Dataset.from_json({"vin": VIN, "Data": [  # pylint: disable=protected-access
+        {"key": "ae0294b4-1286-3e98-a818-1485b8d88430", "dataFieldName": "state_of_charge",
+         "value": "80"},
+        {"key": KEY_PRIMARY_RANGE, "dataFieldName": "value", "value": "999"},
+    ]}))
+
+    assert garage.get_vehicle(VIN).get_electric_drive().range.value is None
+
+
+def test_bare_value_not_reported_as_unmapped():
+    """Bare 'value'/'unit' leaves are handled by key, so they must not show up
+    in the unmapped-sensor diagnostics."""
+    assert 'value' in KNOWN_MAPPED_FIELDS
+    assert 'unit' in KNOWN_MAPPED_FIELDS
