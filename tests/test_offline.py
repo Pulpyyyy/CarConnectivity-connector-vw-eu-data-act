@@ -1275,6 +1275,7 @@ def test_login_probe_tolerates_portal_hiccup():
     client._finish_login(resp)  # pylint: disable=protected-access
 
 
+<<<<<<< HEAD
 # --- terms-and-conditions auto-acceptance (issue #15) ------------------------
 
 TERMS_URL = ("https://identity.vwgroup.io/signin-service/v1/xxx@apps_vw-dilab_com/"
@@ -1352,3 +1353,23 @@ def test_terms_acceptance_does_not_loop():
     with pytest.raises(AuthError, match="terms and conditions"):
         client._finish_login(_FakeResp(TERMS_URL, status_code=200, text=TERMS_HTML))  # pylint: disable=protected-access
     assert len(calls) == 1
+
+
+# --- session headers (issue #15) ---------------------------------------------
+
+def test_session_sends_locale_headers():
+    """The session must send a browser-like header set: the IdP routes
+    header-less clients to legal interstitials a browser never sees (issue
+    #15). Accept-Language follows the configured country/language."""
+    client = EudaApiClient(email="u", password="p", country="ch", language="fr")
+    assert client._session.headers["Accept-Language"] == "fr-CH,fr;q=0.9,en;q=0.8"
+    assert "text/html" in client._session.headers["Accept"]
+    assert "*/*" in client._session.headers["Accept"]
+
+
+def test_session_accept_language_default_and_english():
+    """Default locale (si/sl) and an English locale (no duplicate 'en' tail)."""
+    default = EudaApiClient(email="u", password="p")
+    assert default._session.headers["Accept-Language"] == "sl-SI,sl;q=0.9,en;q=0.8"
+    english = EudaApiClient(email="u", password="p", country="ie", language="en")
+    assert english._session.headers["Accept-Language"] == "en-IE,en;q=0.9"
