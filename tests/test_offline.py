@@ -1275,7 +1275,6 @@ def test_login_probe_tolerates_portal_hiccup():
     client._finish_login(resp)  # pylint: disable=protected-access
 
 
-<<<<<<< HEAD
 # --- terms-and-conditions auto-acceptance (issue #15) ------------------------
 
 TERMS_URL = ("https://identity.vwgroup.io/signin-service/v1/xxx@apps_vw-dilab_com/"
