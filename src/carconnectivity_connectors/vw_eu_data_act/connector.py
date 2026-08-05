@@ -1032,9 +1032,18 @@ class Connector(BaseConnector):
         if isinstance(vehicle, CombustionVehicle):
             self._map_combustion(vehicle, dataset, captured_at)
 
-        # Combined (total) range across all drives, when the portal reports it
-        # directly (the seatcupra connector instead sums the per-engine ranges).
+        # Combined (total) range across all drives. The portal often ships the
+        # cruising_range_combined slot with no value at all (observed empty on
+        # every dataset of a PHEV that reports both per-engine ranges), which
+        # left total_range permanently unset. Fall back to summing the per-engine
+        # ranges, the way the seatcupra connector builds its total. A value
+        # actually reported by the portal always wins over the computed sum.
         combined = dataset.value_of('cruising_range_combined')
+        if combined is None:
+            components = [dataset.value_of(name) for name in
+                          ('cruising_range_primary_engine', 'cruising_range_secondary_engine')]
+            usable = [c for c in components if isinstance(c, (int, float)) and not isinstance(c, bool)]
+            combined = sum(usable) if usable else None
         if combined is not None:
             vehicle.drives.total_range._set_value(value=combined, measured=captured_at, unit=Length.KM)  # pylint: disable=protected-access
             vehicle.drives.total_range.precision = 1
