@@ -1534,3 +1534,53 @@ def test_combined_range_single_engine(connector):
         {"key": "x1", "dataFieldName": "mileage.value", "value": "1000"},
     ]}))
     assert garage.get_vehicle(other).drives.total_range.value is None
+
+
+# --- maintenance countdown sign ----------------------------------------------
+
+def _maintenance_dataset(insp_dist, oil_dist):
+    return Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "m1", "dataFieldName": "maintenance_interval_distance_until_inspection",
+         "value": str(insp_dist)},
+        {"key": "m2", "dataFieldName": "maintenance_interval_distance_until_oil_change",
+         "value": str(oil_dist)},
+    ]})
+
+
+def test_maintenance_distance_remaining_is_positive(connector):
+    """The portal counts down toward zero, so a negative reading means "still
+    remaining" and must surface as a positive distance."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, _maintenance_dataset(-23500, -12000))  # pylint: disable=protected-access
+
+    v = garage.get_vehicle(VIN)
+    assert v.maintenance.inspection_due_after.value == 23500
+    assert v.maintenance.oil_service_due_after.value == 12000
+
+
+def test_maintenance_distance_overdue_stays_negative(connector):
+    """A positive portal reading means the service is overdue. Taking the
+    absolute value would render "overdue by 500 km" exactly like "500 km
+    remaining"; negating keeps the two states apart."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, _maintenance_dataset(500, 1200))  # pylint: disable=protected-access
+
+    v = garage.get_vehicle(VIN)
+    assert v.maintenance.inspection_due_after.value == -500
+    assert v.maintenance.oil_service_due_after.value == -1200
+
+
+def test_maintenance_distance_due_now_is_zero(connector):
+    """Zero is the due point and must stay zero."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, _maintenance_dataset(0, 0))  # pylint: disable=protected-access
+
+    v = garage.get_vehicle(VIN)
+    assert v.maintenance.inspection_due_after.value == 0
+    assert v.maintenance.oil_service_due_after.value == 0

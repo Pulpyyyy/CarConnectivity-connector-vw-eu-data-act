@@ -929,10 +929,15 @@ class Connector(BaseConnector):
             vehicle.window_heatings.heating_state._set_value(  # pylint: disable=protected-access
                 WINDOW_HEATING_MAPPING.get(wh, WindowHeatings.HeatingState.UNKNOWN), measured=captured_at)
 
-        # Maintenance intervals. The portal encodes a signed countdown: a negative
-        # value is the amount still remaining, zero is due, a positive value is
-        # overdue. Expose the time interval as a concrete due date (which conveys
-        # overdue naturally as a past date) and the distance as remaining km.
+        # Maintenance intervals. The portal encodes a signed countdown rising
+        # toward zero: a negative value is the amount still remaining, zero is
+        # due, a positive value is overdue. Expose the time interval as a
+        # concrete due date (which conveys overdue naturally as a past date) and
+        # the distance as remaining km, negating rather than taking the absolute
+        # value: abs() would render "overdue by 500 km" as "500 km remaining",
+        # collapsing the two opposite states onto the same reading. Negation
+        # keeps them apart (remaining stays positive, overdue goes negative) and
+        # matches how the due dates above already handle the sign.
         # The bootstrap-merged dataset can lack a capture time, so anchor the due
         # date on "now" when captured_at is absent.
         date_anchor = captured_at or datetime.now(tz=timezone.utc)
@@ -947,11 +952,11 @@ class Connector(BaseConnector):
         insp_dist = dataset.value_of('maintenance_interval_distance_until_inspection')
         if insp_dist is not None:
             vehicle.maintenance.inspection_due_after._set_value(  # pylint: disable=protected-access
-                value=abs(insp_dist), measured=captured_at, unit=Length.KM)
+                value=-insp_dist, measured=captured_at, unit=Length.KM)
         oil_dist = dataset.value_of('maintenance_interval_distance_until_oil_change')
         if oil_dist is not None:
             vehicle.maintenance.oil_service_due_after._set_value(  # pylint: disable=protected-access
-                value=abs(oil_dist), measured=captured_at, unit=Length.KM)
+                value=-oil_dist, measured=captured_at, unit=Length.KM)
 
         # Outside (ambient) temperature, reported in deci-Kelvin.
         outside = decikelvin_to_celsius(dataset.value_of('outside_temperature'))
