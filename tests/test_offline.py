@@ -1476,6 +1476,66 @@ def test_session_accept_language_default_and_english():
     assert english._session.headers["Accept-Language"] == "en-IE,en;q=0.9"
 
 
+# --- combined range reconstruction -------------------------------------------
+
+def _range_dataset(entries):
+    return Dataset.from_json({"vin": VIN, "Data": [
+        {"key": f"r{i}", "dataFieldName": name, "value": value}
+        for i, (name, value) in enumerate(entries)
+    ]})
+
+
+def test_combined_range_reconstructed_from_engines(connector):
+    """A PHEV reporting both per-engine ranges but an empty combined slot must
+    still get a total range, summed from the components."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, _range_dataset([  # pylint: disable=protected-access
+        ("cruising_range_primary_engine", "630"),
+        ("cruising_range_secondary_engine", "51"),
+        ("cruising_range_combined", ""),
+        ("fuel_level_current_level", "100"),
+        ("state_of_charge", "88"),
+    ]))
+
+    assert garage.get_vehicle(VIN).drives.total_range.value == 681
+
+
+def test_portal_combined_range_wins_over_sum(connector):
+    """A value actually reported by the portal takes precedence over the sum."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, _range_dataset([  # pylint: disable=protected-access
+        ("cruising_range_primary_engine", "630"),
+        ("cruising_range_secondary_engine", "51"),
+        ("cruising_range_combined", "700"),
+        ("fuel_level_current_level", "100"),
+        ("state_of_charge", "88"),
+    ]))
+
+    assert garage.get_vehicle(VIN).drives.total_range.value == 700
+
+
+def test_combined_range_single_engine(connector):
+    """With a single per-engine range the total equals it, and a dataset with
+    no per-engine range at all leaves the total unset."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    connector._map_dataset(VIN, _range_dataset([  # pylint: disable=protected-access
+        ("cruising_range_primary_engine", "420"),
+    ]))
+    assert garage.get_vehicle(VIN).drives.total_range.value == 420
+
+    other = "WVWZZZE1ZLP000999"
+    garage.add_vehicle(other, VWEudaVehicle(vin=other, garage=garage, managing_connector=connector))
+    connector._map_dataset(other, Dataset.from_json({"vin": other, "Data": [  # pylint: disable=protected-access
+        {"key": "x1", "dataFieldName": "mileage.value", "value": "1000"},
+    ]}))
+    assert garage.get_vehicle(other).drives.total_range.value is None
+
+
 # --- maintenance countdown sign ----------------------------------------------
 
 def _maintenance_dataset(insp_dist, oil_dist):
