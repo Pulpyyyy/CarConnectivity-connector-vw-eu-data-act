@@ -1048,6 +1048,16 @@ class Connector(BaseConnector):
             components = [dataset.value_of(name) for name in
                           ('cruising_range_primary_engine', 'cruising_range_secondary_engine')]
             usable = [c for c in components if isinstance(c, (int, float)) and not isinstance(c, bool)]
+            if not usable and not isinstance(vehicle, CombustionVehicle):
+                # Pure EVs that report no named range at all (the range only
+                # reaches them as the key-identified bare 'value', see
+                # KEY_PRIMARY_RANGE) have no component to sum, yet their total
+                # range is simply that single drive's range. Same restriction as
+                # the drive-level mapping: the key holds the *primary* range,
+                # which is the combustion one as soon as there is an engine.
+                by_key = dataset.value_by_key(KEY_PRIMARY_RANGE)
+                if isinstance(by_key, (int, float)) and not isinstance(by_key, bool):
+                    usable = [by_key]
             combined = sum(usable) if usable else None
         if combined is not None:
             vehicle.drives.total_range._set_value(value=combined, measured=captured_at, unit=Length.KM)  # pylint: disable=protected-access
