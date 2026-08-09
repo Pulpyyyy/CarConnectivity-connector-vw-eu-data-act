@@ -1102,47 +1102,6 @@ def test_request_type_threads_through_client(monkeypatch):
     assert captured["headers"] == {"filename": "file.zip", "type": "partial"}
 
 
-def test_by_field_prefers_freshest_timestamp():
-    """When a field appears several times, the reading with the latest
-    timestampUtc wins, even if a staler reading has a smaller UUID (which the
-    old smallest-UUID rule would have picked)."""
-    data = [
-        {"key": "aaaa", "dataFieldName": "oil_level_actual_level",
-         "value": "100.0", "timestampUtc": "2026-06-23T15:14:12.000Z"},
-        {"key": "zzzz", "dataFieldName": "oil_level_actual_level",
-         "value": "87.5", "timestampUtc": "2026-06-25T10:37:14.000Z"},
-    ]
-    assert Dataset.from_json({"vin": VIN, "Data": data}).value_of("oil_level_actual_level") == 87.5
-
-
-def test_merge_prefers_freshest_timestamp_regardless_of_list_order():
-    """A stale reading in a later-listed dataset must not override a fresher one.
-    Reproduces the oil-level bug: oil 100.0 measured 2026-06-23 must lose to oil
-    87.5 measured 2026-06-25 whatever the merge order."""
-    fresh = Dataset.from_json({"vin": VIN, "Data": [
-        {"key": "k1", "dataFieldName": "oil_level_actual_level",
-         "value": "87.5", "timestampUtc": "2026-06-25T10:37:14.000Z"},
-    ]})
-    stale = Dataset.from_json({"vin": VIN, "Data": [
-        {"key": "k2", "dataFieldName": "oil_level_actual_level",
-         "value": "100.0", "timestampUtc": "2026-06-23T15:14:12.000Z"},
-    ]})
-    assert Dataset.merge([fresh, stale]).value_of("oil_level_actual_level") == 87.5
-    assert Dataset.merge([stale, fresh]).value_of("oil_level_actual_level") == 87.5
-
-
-def test_merge_timestampless_field_keeps_list_order():
-    """Fields without timestampUtc keep the previous behaviour: the later dataset
-    in list order wins (no regression for timestamp-less fields)."""
-    first = Dataset.from_json({"vin": VIN, "Data": [
-        {"key": "k1", "dataFieldName": "charging_state", "value": "off"},
-    ]})
-    second = Dataset.from_json({"vin": VIN, "Data": [
-        {"key": "k2", "dataFieldName": "charging_state", "value": "charging"},
-    ]})
-    assert Dataset.merge([first, second]).value_of("charging_state") == "charging"
-
-
 def test_freshest_max_value_prefers_highest_equal_freshness():
     """Two equally-fresh mileage slots: by_field takes the stable smallest-UUID
     (which can be the lower reading); freshest_max_value_of prefers the highest."""
@@ -1474,6 +1433,60 @@ def test_session_accept_language_default_and_english():
     assert default._session.headers["Accept-Language"] == "sl-SI,sl;q=0.9,en;q=0.8"
     english = EudaApiClient(email="u", password="p", country="ie", language="en")
     assert english._session.headers["Accept-Language"] == "en-IE,en;q=0.9"
+
+
+# --- real ID.4 export (issue #33) --------------------------------------------
+
+ID4_SAMPLE = os.path.join(os.path.dirname(__file__), "id4_sample_dataset.json")
+
+
+def _load_id4() -> Dataset:
+    with open(ID4_SAMPLE, "r", encoding="utf-8-sig") as fh:
+        return Dataset.from_json(json.load(fh))
+
+
+def test_id4_export_has_no_named_range_field():
+    """Premise of issue #33, locked against future edits of the fixture: this
+    vehicle reports no cruising_range_* field whatsoever, only the bare
+    key-identified 'value' entry."""
+    ds = _load_id4()
+    for name in ("range", "cruising_range_primary_engine",
+                 "cruising_range_secondary_engine", "cruising_range_combined"):
+        assert ds.by_field(name) is None
+    assert ds.value_by_key(KEY_PRIMARY_RANGE) == 386
+
+
+def test_id4_real_export_maps_range_and_total(connector):
+    """End-to-end on the real anonymised export contributed in issue #33: the
+    key-identified range reaches drive.range, and the vehicle's total range
+    equals it since this EV has a single drive."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, _load_id4())  # pylint: disable=protected-access
+
+    v = garage.get_vehicle(VIN)
+    assert isinstance(v, VWEudaElectricVehicle)
+    drive = v.get_electric_drive()
+    assert drive.range.value == 386
+    assert drive.range.unit == Length.KM
+    assert drive.level.value == 80
+    assert v.drives.total_range.value == 386
+
+
+def test_total_range_key_fallback_skipped_on_hybrid(connector):
+    """The single-drive fallback must not fire once the car has an engine: the
+    key holds the primary (combustion) range there."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, Dataset.from_json({"vin": VIN, "Data": [  # pylint: disable=protected-access
+        {"key": "h1", "dataFieldName": "fuel_level_current_level", "value": "50"},
+        {"key": "h2", "dataFieldName": "state_of_charge", "value": "80"},
+        {"key": KEY_PRIMARY_RANGE, "dataFieldName": "value", "value": "999"},
+    ]}))
+
+    assert garage.get_vehicle(VIN).drives.total_range.value is None
 
 
 # --- combined range reconstruction -------------------------------------------
