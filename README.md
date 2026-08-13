@@ -150,7 +150,7 @@ Both the dotted (nested) and flat portal field names are accepted. Drive slots f
 
 | EU Data Act field | CarConnectivity attribute | Notes |
 |---|---|---|
-| `battery_state_report.soc` / `state_of_charge` | `drive.level` (%) | |
+| `battery_state_report.soc` / `state_of_charge` / `battery_level_HV.value` | `drive.level` (%) | `battery_level_HV` is the fallback when the named SoC fields are absent (reduced MEB deliveries) |
 | `range` / `cruising_range_secondary_engine` | `drive.range` (km) | |
 | `long_term_data_average_electr_engine_consumption` | `drive.consumption` | kWh/1000km → kWh/100km |
 | `min_temperature` / `max_temperature` | `battery.temperature_min` / `temperature_max` (°C) | |

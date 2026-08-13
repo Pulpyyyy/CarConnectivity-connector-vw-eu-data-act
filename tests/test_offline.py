@@ -658,6 +658,8 @@ def test_known_mapped_fields_contains_mapped_fields():
     assert "state_of_charge" in KNOWN_MAPPED_FIELDS
     assert "cruising_range_primary_engine" in KNOWN_MAPPED_FIELDS
     assert "mileage" in KNOWN_MAPPED_FIELDS
+    assert "battery_level_HV.value" in KNOWN_MAPPED_FIELDS
+    assert "battery_level_HV.state" in KNOWN_MAPPED_FIELDS
 
 
 def test_egolf_flat_fields_not_flagged_unmapped(caplog):
@@ -1597,3 +1599,103 @@ def test_maintenance_distance_due_now_is_zero(connector):
     v = garage.get_vehicle(VIN)
     assert v.maintenance.inspection_due_after.value == 0
     assert v.maintenance.oil_service_due_after.value == 0
+
+
+# --- Born battery_level_HV SoC (issue #38) -----------------------------------
+
+BORN_REDUCED_SAMPLE = os.path.join(os.path.dirname(__file__), "born_reduced_sample_dataset.json")
+BORN_FULL_SAMPLE = os.path.join(os.path.dirname(__file__), "born_full_sample_dataset.json")
+
+
+def _load_born(path) -> Dataset:
+    with open(path, "r", encoding="utf-8-sig") as fh:
+        return Dataset.from_json(json.load(fh))
+
+
+def test_born_reduced_export_premise():
+    """Premise of issue #38, locked against future edits of the fixture: the
+    reduced delivery shape (car parked and asleep) carries no named SoC field
+    at all; the state of charge only arrives as battery_level_HV."""
+    ds = _load_born(BORN_REDUCED_SAMPLE)
+    assert ds.by_field("battery_state_report.soc") is None
+    assert ds.by_field("state_of_charge") is None
+    assert ds.value_of("battery_level_HV.value") == 67.0
+    assert ds.value_of("battery_level_HV.state") == "VALID"
+
+
+def test_born_reduced_maps_soc_from_battery_level_hv(connector):
+    """End-to-end on the real Born export contributed in issue #38:
+    battery_level_HV.value reaches drive.level, which in turn unblocks the
+    attributes the core derives from it (range_estimated_full, consumption)."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, _load_born(BORN_REDUCED_SAMPLE))  # pylint: disable=protected-access
+    # The fetch loop flushes notifications after mapping; the core's derived
+    # attributes are computed by on_transaction_end observers.
+    connector.car_connectivity.transaction_end()
+
+    v = garage.get_vehicle(VIN)
+    assert isinstance(v, VWEudaElectricVehicle)
+    drive = v.get_electric_drive()
+    assert drive.level.value == 67.0
+    assert drive.range.value == 325
+    assert v.drives.total_range.value == 325
+    # Derived by the core once level exists: 325 km at 67 % -> ~485 km full,
+    # and 77.25 kWh usable over that projected range -> ~15.9 kWh/100km.
+    assert drive.range_estimated_full.value == pytest.approx(485.07, abs=0.01)
+    assert drive.battery.available_capacity.value == pytest.approx(77.25)
+    assert drive.consumption.value == pytest.approx(15.93, abs=0.01)
+
+
+def test_born_full_maps_soc_from_named_report(connector):
+    """The full delivery shape has both SoC sources agreeing; mapping stays on
+    the named report and the rest of the dataset maps as usual."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, _load_born(BORN_FULL_SAMPLE))  # pylint: disable=protected-access
+
+    v = garage.get_vehicle(VIN)
+    assert isinstance(v, VWEudaElectricVehicle)
+    assert v.get_electric_drive().level.value == 72
+    assert v.get_electric_drive().range.value == 394
+    assert v.odometer.value == 10256
+
+
+def test_battery_level_hv_yields_to_named_soc(connector):
+    """Where both fields are present the named report wins. They agree on every
+    real export seen so far; this locks the priority in case they diverge."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, Dataset.from_json({"vin": VIN, "Data": [  # pylint: disable=protected-access
+        {"key": "s1", "dataFieldName": "battery_state_report.soc", "value": "50"},
+        {"key": "s2", "dataFieldName": "battery_level_HV.value", "value": "60.0"},
+    ]}))
+
+    assert garage.get_vehicle(VIN).get_electric_drive().level.value == 50
+
+
+def test_battery_level_hv_alone_promotes_electric(connector):
+    """battery_level_HV is a traction-battery field, so its presence alone must
+    promote the vehicle to electric and fill the drive level."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+
+    connector._map_dataset(VIN, Dataset.from_json({"vin": VIN, "Data": [  # pylint: disable=protected-access
+        {"key": "s1", "dataFieldName": "battery_level_HV.value", "value": "55.0"},
+    ]}))
+
+    v = garage.get_vehicle(VIN)
+    assert isinstance(v, VWEudaElectricVehicle)
+    assert v.get_electric_drive().level.value == 55.0
+
+
+def test_battery_level_hv_not_flagged_unmapped(caplog):
+    """Once mapped, battery_level_HV must no longer be reported as a new
+    unmapped sensor (the reduced Born export is full of fields that still are;
+    only this family is asserted here)."""
+    with caplog.at_level(logging.INFO, logger="carconnectivity.connectors.vw_eu_data_act"):
+        Connector._detect_unmapped_fields(VIN, _load_born(BORN_REDUCED_SAMPLE))  # pylint: disable=protected-access
+    assert "battery_level_HV" not in caplog.text

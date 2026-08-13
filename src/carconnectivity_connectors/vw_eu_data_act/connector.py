@@ -160,6 +160,11 @@ KNOWN_MAPPED_FIELDS: set[str] = {
     'locked',
     'window_heating_state',
     'battery_state_report.soc',
+    # SoC of the reduced MEB delivery shape, which omits battery_state_report.soc
+    # entirely (issue #38): the value backs drive.level, the state leaf just
+    # accompanies it.
+    'battery_level_HV.value',
+    'battery_level_HV.state',
     'range',
     'min_temperature',
     'max_temperature',
@@ -859,7 +864,7 @@ class Connector(BaseConnector):
         has_electric = any(dataset.by_field(f) is not None for f in (
             'battery_state_report.soc', 'battery_state_report.charge_power',
             'charging_state_report.current_charge_state', 'state_of_charge',
-            'cruising_range_secondary_engine'))
+            'cruising_range_secondary_engine', 'battery_level_HV.value'))
         has_fuel = any(dataset.by_field(f) is not None for f in (
             'fuel_level_current_level', 'tank_current_level',
             'long_term_data_average_fuel_consumption', 'short_term_data_average_fuel_consumption'))
@@ -1075,6 +1080,12 @@ class Connector(BaseConnector):
 
         # State of charge -> drive level (%)
         soc = dataset.value_of('battery_state_report.soc')
+        if soc is None:
+            # The reduced MEB delivery shape (observed on a Cupra Born while the
+            # car sleeps, issue #38) omits battery_state_report.soc; the SoC then
+            # only arrives as battery_level_HV.value. Where both are present they
+            # agree, so the named report stays the primary source.
+            soc = dataset.value_of('battery_level_HV.value')
         if soc is not None:
             drive.level._set_value(value=soc, measured=captured_at)  # pylint: disable=protected-access
             drive.level.precision = 1
@@ -1100,9 +1111,10 @@ class Connector(BaseConnector):
         # same concept the skoda connector fills from the static spec, so it backs
         # a derivable state of health = available_capacity / total_capacity.
         # Matched by prefix because the exact leaf is unconfirmed, which also skips
-        # the companion value_type enum. NOTE: the /10 scaling (deci-kWh) follows
-        # the request in issue #22 and is unverified against a real value. Absent
-        # on many vehicles (guarded).
+        # the companion value_type enum. The /10 scaling (deci-kWh) follows the
+        # request in issue #22 and was confirmed by a real Born export (issue
+        # #38): maximal 772.5 on a 77 kWh pack, with current/maximal matching the
+        # reported SoC. Absent on many vehicles (guarded).
         max_energy = dataset.freshest_numeric_by_prefix('energy_contents.maximal_energy_content')
         if isinstance(max_energy, (int, float)):
             battery.available_capacity._set_value(  # pylint: disable=protected-access
