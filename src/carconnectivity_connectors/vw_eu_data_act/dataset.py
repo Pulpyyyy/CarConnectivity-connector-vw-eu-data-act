@@ -279,6 +279,14 @@ class Dataset:
                 ts = parse_timestamp(dp.raw_value)
                 if ts:
                     captured.append(ts)
+        if not captured:
+            # Flat-format datasets name no car_captured_time field; their
+            # per-entry timestampUtc ("when the car last reported this field")
+            # carries the measurement side instead. Take the newest so mapping
+            # stamps values with a measurement time rather than falling back to
+            # the delivery slot time (README dataset-semantics notes; #38
+            # follow-up).
+            captured = [dp.timestamp for dp in points.values() if dp.timestamp is not None]
         return cls(
             vin=payload.get("vin", ""),
             user_id=payload.get("user_id"),
