@@ -1699,3 +1699,30 @@ def test_battery_level_hv_not_flagged_unmapped(caplog):
     with caplog.at_level(logging.INFO, logger="carconnectivity.connectors.vw_eu_data_act"):
         Connector._detect_unmapped_fields(VIN, _load_born(BORN_REDUCED_SAMPLE))  # pylint: disable=protected-access
     assert "battery_level_HV" not in caplog.text
+
+
+# --- flat format: per-field timestamps (premise lock) ------------------------
+
+FLAT_TS_SAMPLE = os.path.join(os.path.dirname(__file__), "flat_timestamped_sample_dataset.json")
+
+
+def test_flat_export_premise_per_field_timestamps():
+    """Premise lock on a real anonymised flat-format export: every entry carries
+    its own timestampUtc and there is no report-level car_captured_time entry,
+    the mirror image of the dotted MEB shape (see the Born fixtures). The four
+    distinct stamp groups span 13 hours, which is why fields of one dataset must
+    not be read as simultaneous (see README, dataset-semantics notes)."""
+    with open(FLAT_TS_SAMPLE, "r", encoding="utf-8-sig") as fh:
+        payload = json.load(fh)
+    entries = payload["Data"]
+    assert all(e.get("timestampUtc") for e in entries)
+    assert not any(e.get("dataFieldName") == "car_captured_time" for e in entries)
+    stamps = {e["timestampUtc"] for e in entries}
+    assert len(stamps) == 4
+
+    ds = Dataset.from_json(payload)
+    # Nothing is named car_captured_time on this format, so today the dataset
+    # yields no captured_at and mapping falls back to the delivery time. The
+    # 0.3.1 series derives it from the per-field timestamps instead; this
+    # assertion is the one to flip when that lands.
+    assert ds.captured_at is None

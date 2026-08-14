@@ -122,6 +122,24 @@ Both the dotted (nested) and flat portal field names are accepted. Drive slots f
 (see *Drivetrains* above): on a PHEV the electric drive is the `secondary` slot and combustion is
 `primary`; on a pure EV the electric drive is the single `primary` slot.
 
+**A dataset is a merge, not a moment.** One portal delivery flattens several vehicle reports, each
+captured at its own time, into a single unordered array. The official data dictionary defines a
+capture timestamp per report group, but the flat export drops the grouping: nothing ties a field to
+the report it came from. Two fields of the same dataset must therefore not be read as simultaneous
+(spreads from minutes to several hours between report groups have been observed on real exports).
+The failure mode is quiet: a charging state captured before a scheduled charge can sit right next to
+a charge power captured during it, and both are correct. The two payload formats age differently:
+flat-format vehicles stamp (nearly) every entry with its own `timestampUtc` ("when the car last
+reported this field"), while dotted-format (MEB) exports carry no `timestampUtc` at all, only
+report-level `car_captured_time` entries that nothing references.
+
+**A new delivery is not a new measurement.** The vehicle reports on events (ignition, charging
+steps, warnings) and goes quiet when parked; the portal publishes on its own cadence regardless, so
+a delivery can carry values captured many hours earlier. `connector.last_update` is the delivery
+time and the vehicle's `captured_at` the newest measurement time of the merged dataset: the delivery
+is the postman, `captured_at` is the date on the letter. Automations acting on momentary values
+(such as `charging.power`) should check `captured_at` before trusting them.
+
 ### Vehicle
 
 | EU Data Act field | CarConnectivity attribute | Notes |
