@@ -1721,8 +1721,7 @@ def test_flat_export_premise_per_field_timestamps():
     assert len(stamps) == 4
 
     ds = Dataset.from_json(payload)
-    # Nothing is named car_captured_time on this format, so today the dataset
-    # yields no captured_at and mapping falls back to the delivery time. The
-    # 0.3.1 series derives it from the per-field timestamps instead; this
-    # assertion is the one to flip when that lands.
-    assert ds.captured_at is None
+    # Nothing is named car_captured_time on this format: captured_at is derived
+    # from the newest per-field timestampUtc, so values are stamped with a
+    # measurement time instead of the delivery slot time.
+    assert ds.captured_at == datetime(2026, 7, 31, 10, 40, 28, tzinfo=timezone.utc)
