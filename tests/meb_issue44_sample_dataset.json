@@ -1,0 +1,511 @@
+{
+  "vin": "REDACTED_VIN",
+  "user_id": "REDACTED_USER_ID",
+  "Data": [
+    {
+      "key": "67d015ee-c2c0-383d-ab67-33ac674c0129",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:12:06.271Z"
+    },
+    {
+      "key": "f5ec0055-1e94-3b1f-8064-4cae5d947e8e",
+      "dataFieldName": "additional_consumptions.interior_climatization_consumption",
+      "value": "2.8"
+    },
+    {
+      "key": "af3b7b12-f0bc-343e-8bdb-55ad510281c1",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "a6b9cb56-3538-3b6c-ac3d-338309c857fd",
+      "dataFieldName": "car_captured_time",
+      "value": "2026-09-07T06:12:07.121Z"
+    },
+    {
+      "key": "554be87f-539f-3f6c-9622-bcbbd5a55cb7",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:12:06.267Z"
+    },
+    {
+      "key": "295187a1-3fbc-3f65-aba6-ce2f31285ef4",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:59Z"
+    },
+    {
+      "key": "a04d086d-70bb-30c2-8361-68da66b4fd97",
+      "dataFieldName": "mileage.state",
+      "value": "VALID"
+    },
+    {
+      "key": "12a65441-a5a5-3a5f-a854-0a9b23abb622",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "a53cf95e-0c24-30b0-84d1-d4d618224376",
+      "dataFieldName": "additional_consumptions.residual_consumption",
+      "value": "3.6999998"
+    },
+    {
+      "key": "c2997ad6-04cb-3c80-880c-f13d518448ca",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "45db10d7-e757-31bc-b3cb-cc3f26c03333",
+      "dataFieldName": "car_captured_time",
+      "value": "2026-09-07T06:12:11Z"
+    },
+    {
+      "key": "75d65f00-5fa8-334a-826d-e73e91fe5c8d",
+      "dataFieldName": "mileage.value",
+      "value": "53533"
+    },
+    {
+      "key": "0718582b-7259-3c9a-818a-ea848a7365a8",
+      "dataFieldName": "state",
+      "value": "VALID"
+    },
+    {
+      "key": "bd917b58-82bd-3c34-a006-747ca5aec03d",
+      "dataFieldName": "locked",
+      "value": "true"
+    },
+    {
+      "key": "5768ad07-5ef9-3d6f-9526-978980d7e40a",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:58Z"
+    },
+    {
+      "key": "d52106b4-84aa-39da-8e13-124f07d1204d",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "49483a41-6452-3438-ac80-2087775c4fe5",
+      "dataFieldName": "car_captured_time",
+      "value": "2026-09-07T06:12:12Z"
+    },
+    {
+      "key": "b3b04f31-b10e-38aa-b8ad-c0da7c06caea",
+      "dataFieldName": "settings.target_soc",
+      "value": "80"
+    },
+    {
+      "key": "cdd68160-2c48-3181-af84-79d0a4109d32",
+      "dataFieldName": "charge_mode_selection_options.timer_charging_climatization",
+      "value": "false"
+    },
+    {
+      "key": "d8bc5d37-5c01-37fa-ae6d-c54405eb5f3f",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:12:06.307Z"
+    },
+    {
+      "key": "a56dfff2-0f8f-3c72-be78-e1adcc4c2931",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-07T06:11:46Z"
+    },
+    {
+      "key": "f295ae23-0485-3ccb-830b-58c644a04f2e",
+      "dataFieldName": "profile_state_report.instrument_cluster_time",
+      "value": "2026-09-07T08:12:07.000+02:00"
+    },
+    {
+      "key": "8fbb198f-872a-33b2-8c2f-84a3185f1b3a",
+      "dataFieldName": "slope_consumption_values.descent_slope_consumption.physical_value",
+      "value": "36.78"
+    },
+    {
+      "key": "262b34e4-831f-37ef-af20-7a13da5706dc",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:59Z"
+    },
+    {
+      "key": "7c8ec93e-74ce-3761-985d-5580f0f4bf26",
+      "dataFieldName": "car_captured_time",
+      "value": "2026-09-07T06:31:49Z"
+    },
+    {
+      "key": "75184561-67be-36ed-a951-d2b398cc256f",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:11:26.987Z"
+    },
+    {
+      "key": "2e0ca17a-962a-3c73-b532-0d60c21020fc",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:58Z"
+    },
+    {
+      "key": "8040d6f6-7fe1-3d81-983e-271584e4177d",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:31:13.016Z"
+    },
+    {
+      "key": "bc5027b4-a92e-32ca-a2a6-ef7f9bc96309",
+      "dataFieldName": "additional_consumptions.interior_climatization_consumption",
+      "value": "2.8"
+    },
+    {
+      "key": "a894455d-2917-33cf-a9bd-d05846a14cfe",
+      "dataFieldName": "window_heating_state",
+      "value": "WINDOW_HEATING_STATE_OFF"
+    },
+    {
+      "key": "47015e31-2d7f-3cda-a6c3-0dfa3123b925",
+      "dataFieldName": "car_captured_time",
+      "value": "2026-09-07T06:12:12Z"
+    },
+    {
+      "key": "84e64812-6eaa-3477-b587-0c5b02d8446f",
+      "dataFieldName": "energy_contents.current_energy_content.physical_value",
+      "value": "479.5"
+    },
+    {
+      "key": "9d044be1-53c1-3e2f-b532-b00e6d505783",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:58Z"
+    },
+    {
+      "key": "a7537a9c-a269-307a-a15c-2bc59454c25b",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:59Z"
+    },
+    {
+      "key": "3dc12462-4854-3c9e-8428-a61d7c1c3297",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "c98af658-9d4b-30e8-a933-307d93108aef",
+      "dataFieldName": "user_id",
+      "value": "REDACTED_USER_ID"
+    },
+    {
+      "key": "f25e91bb-c5f3-3e35-b54b-4bcccbdc4cb9",
+      "dataFieldName": "car_captured_time",
+      "value": "2026-09-07T06:12:12Z"
+    },
+    {
+      "key": "03ad2fc6-8caa-33b7-9992-9fb288f876c1",
+      "dataFieldName": "profile_state_report.car_captured_time",
+      "value": "2026-09-07T06:12:07.892Z"
+    },
+    {
+      "key": "4cf0ff03-1290-3e50-afd9-027970915a67",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_ADDITIONAL_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "0fa69b72-8432-3ef4-a312-cbb2f7861dfc",
+      "dataFieldName": "parking_light_right",
+      "value": "true"
+    },
+    {
+      "key": "d0fea44d-fe29-3dd8-969c-d687f3f0cb77",
+      "dataFieldName": "charge_mode_selection_options.preferred_charging_times",
+      "value": "false"
+    },
+    {
+      "key": "929a4fa9-08b0-38c7-866d-65b9b150bfc8",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_ADDITIONAL_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "481ad2e2-4de7-3352-a2ee-bcfbf22aefc8",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_ADDITIONAL_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "0140e2ae-3ca2-3991-a97b-ba07bf139bd7",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:58Z"
+    },
+    {
+      "key": "9c171290-fe3d-3304-890e-b9a52fbc5ef5",
+      "dataFieldName": "energy_contents.maximal_energy_content.value_type",
+      "value": "VALUE_TYPE_PHYSICAL"
+    },
+    {
+      "key": "42986641-9117-3669-89eb-430e8c415ca7",
+      "dataFieldName": "car_captured_time",
+      "value": "2026-09-07T06:12:40Z"
+    },
+    {
+      "key": "12c88f08-e0f5-3798-9b69-ab3d38ccbad8",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-07T09:00:34Z"
+    },
+    {
+      "key": "52b18582-0ee4-3353-9aa5-ab50ba533c8a",
+      "dataFieldName": "additional_consumptions.interior_climatization_consumption",
+      "value": "2.8"
+    },
+    {
+      "key": "dd27c928-9a72-3fc8-935a-6e328d080977",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:59Z"
+    },
+    {
+      "key": "6afb2dbc-69f7-3e32-9474-a28023bd1341",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:12:06.414Z"
+    },
+    {
+      "key": "dc4a4716-2205-352f-802f-8d7d59705c5b",
+      "dataFieldName": "max_temperature",
+      "value": "20.5"
+    },
+    {
+      "key": "23380833-5427-3e28-ad47-e7597f3cd047",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_CONFIGURATIONS"
+    },
+    {
+      "key": "6ce43709-73fc-3024-806f-068aad8ca9d2",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:58Z"
+    },
+    {
+      "key": "c0bb1348-5d0d-3140-9a51-06881db06490",
+      "dataFieldName": "open",
+      "value": "true"
+    },
+    {
+      "key": "beafe64e-9076-3034-aaae-bda0d1bbc3be",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:12:04.185Z"
+    },
+    {
+      "key": "30066859-2b5b-31db-86bf-c1a504a296af",
+      "dataFieldName": "slope_consumption_values.descent_slope_consumption.value_type",
+      "value": "VALUE_TYPE_PHYSICAL"
+    },
+    {
+      "key": "63867bab-f3a4-3065-be67-009066c25572",
+      "dataFieldName": "setting.bcam_activation",
+      "value": "BCAM_ACTIVATION_ACTIVATED"
+    },
+    {
+      "key": "90abf54e-39cd-3faf-b695-e3d7520c427e",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "eca5d171-d3d3-3a73-936d-0c6b51997062",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_ADDITIONAL_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "53975124-320c-3a72-813a-8564f594850e",
+      "dataFieldName": "settings.charge_mode_selection",
+      "value": "CHARGE_MODE_SELECTION_IMMEDIATECHARGING"
+    },
+    {
+      "key": "b6578915-a5d6-329d-8949-c0e567400cb1",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:59Z"
+    },
+    {
+      "key": "0387de65-ce87-3750-b9d7-906687095200",
+      "dataFieldName": "settings.max_charge_current_ac",
+      "value": "MAX_CHARGE_CURRENT_AC_MAXIMUM"
+    },
+    {
+      "key": "d8e0307c-f31b-3896-a9e8-001949a52d11",
+      "dataFieldName": "parking_brake",
+      "value": "true"
+    },
+    {
+      "key": "a0d94ba4-7674-3934-b542-5c6b76aad876",
+      "dataFieldName": "slope_consumption_values.ascent_slope_consumption.value_type",
+      "value": "VALUE_TYPE_PHYSICAL"
+    },
+    {
+      "key": "493476b5-3aea-30b7-a937-256d862adf25",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T04:36:33.041Z"
+    },
+    {
+      "key": "76bcb7e5-f11e-363c-aa6c-f30212c7ec2c",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "fd3a9ffa-5da9-3d06-a1a6-e0550910abfe",
+      "dataFieldName": "message_id",
+      "value": "RPT_1"
+    },
+    {
+      "key": "c05673ec-3328-3c66-994a-bffd5beeb402",
+      "dataFieldName": "additional_consumptions.residual_consumption",
+      "value": "3.6999998"
+    },
+    {
+      "key": "711385c5-9868-37df-8296-c5b20caf1ac3",
+      "dataFieldName": "additional_consumptions.residual_consumption",
+      "value": "3.6999998"
+    },
+    {
+      "key": "fc78c9ac-afa8-3ae0-b92d-890af9b0bb1a",
+      "dataFieldName": "mileage.state",
+      "value": "VALID"
+    },
+    {
+      "key": "374014c4-2fd5-3d73-ac75-7c949e726f00",
+      "dataFieldName": "min_temperature",
+      "value": "20.0"
+    },
+    {
+      "key": "d8d3e58b-b527-39b6-8d71-c3da9c7e2816",
+      "dataFieldName": "instrument_cluster_time",
+      "value": "2026-09-07T08:12:07.000+02:00"
+    },
+    {
+      "key": "50f3e0ce-42c0-30cc-becd-fa6f4fe00a25",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_ENERGY_CONTENTS"
+    },
+    {
+      "key": "d2ee04a0-451e-3c0e-b4d4-d40746df78b6",
+      "dataFieldName": "message_id",
+      "value": "RPT_0"
+    },
+    {
+      "key": "c7ffb8a5-0dc3-3dca-bacf-153f0d3fd4fa",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T05:20:27.906Z"
+    },
+    {
+      "key": "1763a4fe-d8a6-3b8c-b095-70081f3e61c7",
+      "dataFieldName": "charge_mode_selection_options.immediate_discharging",
+      "value": "false"
+    },
+    {
+      "key": "b24b8c24-662b-3540-9bf3-6ea953e5303e",
+      "dataFieldName": "error_code",
+      "value": "#0"
+    },
+    {
+      "key": "c75fddcf-cdb1-3921-9570-3d08017ea277",
+      "dataFieldName": "charge_mode_selection_options.immediate_charging",
+      "value": "true"
+    },
+    {
+      "key": "09ed1319-7b17-31c6-ba74-817ce91a4c1d",
+      "dataFieldName": "energy_contents.maximal_energy_content.physical_value",
+      "value": "736.5"
+    },
+    {
+      "key": "5c291f94-f7fb-35ce-89dd-90dd7ee31b1a",
+      "dataFieldName": "charge_mode_selection_options.timer_charging",
+      "value": "false"
+    },
+    {
+      "key": "85fbdac0-35e4-374e-b89f-a2520215a355",
+      "dataFieldName": "state",
+      "value": "VALID"
+    },
+    {
+      "key": "bfb33d47-84a1-3c69-97bf-a82663ec1b3c",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:12:06.378Z"
+    },
+    {
+      "key": "c7828009-144b-36e9-af38-2c35e7356c34",
+      "dataFieldName": "parking_light_left",
+      "value": "true"
+    },
+    {
+      "key": "9d78eef2-c500-345c-ac9e-bed85fbc5a22",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:31:13.125Z"
+    },
+    {
+      "key": "fce3b0f3-6206-3d8c-bf1c-905b5a2e1fb0",
+      "dataFieldName": "car_captured_time",
+      "value": "2026-09-07T06:12:13Z"
+    },
+    {
+      "key": "ac47bec5-b25f-3287-aa83-02fe0bcb2494",
+      "dataFieldName": "charge_mode_selection_options.home_storage_charging",
+      "value": "false"
+    },
+    {
+      "key": "f4c8b37d-6f1f-3e24-94de-d7741f0fd17e",
+      "dataFieldName": "additional_consumptions.interior_climatization_consumption",
+      "value": "2.8"
+    },
+    {
+      "key": "2d7b0796-dc72-343d-b69f-4789bc0fcff2",
+      "dataFieldName": "settings.auto_unlock_ac",
+      "value": "AUTO_UNLOCK_AC_OFF"
+    },
+    {
+      "key": "45df4e5a-c2e3-3588-b917-e572ef5ac213",
+      "dataFieldName": "slope_consumption_values.ascent_slope_consumption.physical_value",
+      "value": "54.699997"
+    },
+    {
+      "key": "399637c2-b835-3b09-b0ab-0e80b5c4dcc7",
+      "dataFieldName": "report_type",
+      "value": "REPORT_TYPE_CONSUMPTION_VALUES"
+    },
+    {
+      "key": "dabd99e5-ff5d-3555-b234-2b52be48f75f",
+      "dataFieldName": "additional_consumptions.residual_consumption",
+      "value": "3.6999998"
+    },
+    {
+      "key": "72effed7-4ee6-33d6-922a-0876c6e17056",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:58Z"
+    },
+    {
+      "key": "9b377d04-c63b-3eda-a84a-4e2de581f1e3",
+      "dataFieldName": "car_captured_utc_timestamp",
+      "value": "2026-09-05T11:15:59Z"
+    },
+    {
+      "key": "067f539c-85fe-3067-9c29-d63e177e3712",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:12:06.370Z"
+    },
+    {
+      "key": "3c19831c-38b8-3dc5-9ead-bb333616d925",
+      "dataFieldName": "remaining_climate_time",
+      "value": "0s"
+    },
+    {
+      "key": "fbe8bab2-344e-34c8-8ac4-4b18156128cf",
+      "dataFieldName": "energy_contents.current_energy_content.value_type",
+      "value": "VALUE_TYPE_PHYSICAL"
+    },
+    {
+      "key": "bfd88f68-a91a-35f7-8041-e2003d883472",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:12:06.350Z"
+    },
+    {
+      "key": "30cc36fd-71ca-3c09-9296-e94ebd47bd2b",
+      "dataFieldName": "mileage.value",
+      "value": "53533"
+    },
+    {
+      "key": "89049f0f-9481-3c8e-bfd4-16c2935963ae",
+      "dataFieldName": "charge_mode_selection_options.only_own_current",
+      "value": "false"
+    },
+    {
+      "key": "7b76a2c8-162c-3438-814b-0768f6cc6649",
+      "dataFieldName": "timestamp",
+      "value": "1788761521294"
+    },
+    {
+      "key": "b66a49f0-481d-3ca9-a22f-66c4b797bfeb",
+      "dataFieldName": "timestamp",
+      "value": "2026-09-07T06:12:06.364Z"
+    }
+  ]
+}

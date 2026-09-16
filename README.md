@@ -140,6 +140,15 @@ time and the vehicle's `captured_at` the newest measurement time of the merged d
 is the postman, `captured_at` is the date on the letter. Automations acting on momentary values
 (such as `charging.power`) should check `captured_at` before trusting them.
 
+**A repeated capture time is not re-stamped.** While the car sleeps, most deliveries carry the
+same newest capture time as the previous one (63 of 74 consecutive deliveries on a real flat-format
+run). The connector then leaves an unchanged attribute alone rather than writing it again: the core
+would otherwise replace the stored measurement time with the wall clock, after which every later real
+capture, always older than that clock, is refused as "Value from the past" until the car reports
+something newer than the clock itself (#44). A value that does change under an unchanged capture time
+is still taken, with its measurement time kept. When a dataset carries no capture time at all, the
+delivery's `createdOn` is used as the measurement time rather than leaving it to the clock.
+
 ### Vehicle
 
 | EU Data Act field | CarConnectivity attribute | Notes |

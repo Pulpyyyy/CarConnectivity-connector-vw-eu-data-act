@@ -1725,3 +1725,75 @@ def test_flat_export_premise_per_field_timestamps():
     # from the newest per-field timestampUtc, so values are stamped with a
     # measurement time instead of the delivery slot time.
     assert ds.captured_at == datetime(2026, 7, 31, 10, 40, 28, tzinfo=timezone.utc)
+
+
+MEB44 = os.path.join(os.path.dirname(__file__), "meb_issue44_sample_dataset.json")
+
+
+def _meb44_payload() -> dict:
+    with open(MEB44, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _with(payload: dict, **overrides) -> dict:
+    """Copy of a payload with every entry of the named fields set to the given value."""
+    data = [dict(item) for item in payload["Data"]]
+    for item in data:
+        if item["dataFieldName"] in overrides:
+            item["value"] = overrides[item["dataFieldName"]]
+    return {**payload, "Data": data}
+
+
+def test_repeated_capture_time_never_becomes_a_clock_stamp(connector):
+    """mikrohard#44: core swaps last_updated for now() when it is handed the same
+    measured time twice; the connector must never trigger that, or every later
+    real capture (always older than the clock) is refused as 'Value from the past'."""
+    garage = connector.car_connectivity.garage
+    vehicle = VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector)
+    garage.add_vehicle(VIN, vehicle)
+    payload = _meb44_payload()
+    captured = datetime(2026, 9, 7, 6, 31, 49, tzinfo=timezone.utc)
+
+    ds = Dataset.from_json(payload)
+    assert ds.captured_at == captured
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+    vehicle = garage.get_vehicle(VIN)
+    assert vehicle.odometer.value == 53533
+    assert vehicle.odometer.last_updated == captured
+    assert vehicle.doors.lock_state.last_updated == captured
+
+    # Quiet delivery: same capture time, same values -> no write, no clock stamp.
+    connector._map_dataset(VIN, Dataset.from_json(payload))  # pylint: disable=protected-access
+    assert vehicle.odometer.last_updated == captured
+    assert vehicle.doors.lock_state.last_updated == captured
+    assert vehicle.window_heatings.heating_state.last_updated == captured
+
+    # Changed value under the same capture time: taken, and the measurement time
+    # stays a measurement time (nudged, not replaced by the clock).
+    connector._map_dataset(VIN, Dataset.from_json(_with(payload, **{"mileage.value": "53540"})))  # pylint: disable=protected-access
+    assert vehicle.odometer.value == 53540
+    assert timedelta(0) < vehicle.odometer.last_updated - captured < timedelta(seconds=1)
+
+    # A genuinely newer capture, delivered later, is accepted: the reporter's
+    # 06:31:49Z was refused behind a 06:58:25 clock stamp on 0.3.0.
+    newer = _with(payload, **{"mileage.value": "53560", "car_captured_time": "2026-09-07T06:58:49Z"})
+    connector._map_dataset(VIN, Dataset.from_json(newer))  # pylint: disable=protected-access
+    assert vehicle.odometer.value == 53560
+    assert vehicle.odometer.last_updated == datetime(2026, 9, 7, 6, 58, 49, tzinfo=timezone.utc)
+
+
+def test_measured_falls_back_to_created_on_never_none(connector):
+    """A dataset with no capture time at all must be stamped with the delivery's
+    createdOn, not left to core, which would store the wall clock and then refuse
+    every later real capture."""
+    garage = connector.car_connectivity.garage
+    vehicle = VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector)
+    garage.add_vehicle(VIN, vehicle)
+    created = datetime(2026, 9, 7, 10, 30, 0, tzinfo=timezone.utc)
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "k1", "dataFieldName": "mileage.value", "value": "100"},
+    ]})
+    assert ds.captured_at is None
+    connector._map_dataset(VIN, ds, created)  # pylint: disable=protected-access
+    vehicle = garage.get_vehicle(VIN)
+    assert vehicle.odometer.last_updated == created
