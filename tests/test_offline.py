@@ -14,6 +14,7 @@ import pytest
 from carconnectivity.carconnectivity import CarConnectivity
 from carconnectivity.charging import Charging
 from carconnectivity.doors import Doors
+from carconnectivity.errors import TooManyRequestsError
 from carconnectivity.observable import Observable
 from carconnectivity.window_heating import WindowHeatings
 
@@ -446,6 +447,182 @@ def test_network_errors_become_apierror():
         client.download_dataset("WVWZZZE1ZLP010257", "ident", "x.zip")
 
 
+def _http_response(status_code, headers=None):
+    response = requests.Response()
+    response.status_code = status_code
+    response.headers.update(headers or {})
+    return response
+
+
+def test_json_get_raises_too_many_requests_for_http_429(monkeypatch):
+    """Real 429s were seen on the listing endpoint (PR #43): they must reach the
+    back-off instead of the generic one-minute retry."""
+    client = EudaApiClient(email="user@example.com", password="secret")
+    monkeypatch.setattr(client, "_session_get", lambda *_args, **_kwargs: _http_response(429))
+
+    with pytest.raises(TooManyRequestsError) as err:
+        client._get_json("https://example.invalid/data", _retry=False)  # pylint: disable=protected-access
+    assert err.value.retry_after is None
+
+
+def test_download_raises_too_many_requests_for_http_429(monkeypatch):
+    client = EudaApiClient(email="user@example.com", password="secret")
+    monkeypatch.setattr(client, "ensure_login", lambda: None)
+    monkeypatch.setattr(client, "_session_get",
+                        lambda *_args, **_kwargs: _http_response(429, {"Retry-After": "120"}))
+
+    with pytest.raises(TooManyRequestsError) as err:
+        client.download_dataset(VIN, "identifier", "dataset.zip")
+    assert err.value.retry_after == 120
+
+
+def test_retry_after_http_date_is_converted_to_seconds(monkeypatch):
+    client = EudaApiClient(email="user@example.com", password="secret")
+    when = (datetime.now(tz=timezone.utc) + timedelta(minutes=5)).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    monkeypatch.setattr(client, "_session_get",
+                        lambda *_args, **_kwargs: _http_response(429, {"Retry-After": when}))
+
+    with pytest.raises(TooManyRequestsError) as err:
+        client._get_json("https://example.invalid/data", _retry=False)  # pylint: disable=protected-access
+    assert 240 <= err.value.retry_after <= 300
+
+
+def test_json_get_keeps_other_http_errors_generic(monkeypatch):
+    client = EudaApiClient(email="user@example.com", password="secret")
+    monkeypatch.setattr(client, "_session_get", lambda *_args, **_kwargs: _http_response(500))
+
+    with pytest.raises(ApiError):
+        client._get_json("https://example.invalid/data", _retry=False)  # pylint: disable=protected-access
+
+
+def test_historical_recon_propagates_rate_limits(connector):
+    """The optional historical path must not swallow account rate limits."""
+    connector.active_config["historical"] = True
+
+    class _RateLimitedClient:
+        def get_metadata(self, vin, request_type="partial"):
+            raise TooManyRequestsError("HTTP 429")
+
+    connector.client = _RateLimitedClient()
+
+    with pytest.raises(TooManyRequestsError):
+        connector._historical_recon(VIN)  # pylint: disable=protected-access
+
+
+def test_bootstrap_resumes_after_rate_limit(connector):
+    """A 429 mid-bootstrap must not throw away what was already downloaded: the
+    next attempt only fetches the files it does not have yet (PR #43)."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    payload = json.load(open(SAMPLE, "r", encoding="utf-8"))
+    names = ["2026053010%02d00_%s.zip" % (minute, VIN) for minute in (0, 15, 30)]
+
+    class _FakeClient:
+        def __init__(self):
+            self.listing = names
+            self.downloads = []
+            self.limit_on = names[1]
+
+        def list_datasets(self, vin, identifier):
+            return [{"name": n, "createdOn": "2026-05-30T10:%s:00Z" % n[10:12]} for n in self.listing]
+
+        def download_dataset(self, vin, identifier, name):
+            if name == self.limit_on:
+                self.limit_on = None
+                raise TooManyRequestsError("Download -> HTTP 429")
+            self.downloads.append(name)
+            return payload
+
+    fake = _FakeClient()
+    connector.client = fake
+    connector._identifiers[VIN] = "ident"  # pylint: disable=protected-access
+
+    with pytest.raises(TooManyRequestsError):
+        connector._update_vehicle(VIN)  # pylint: disable=protected-access
+    assert fake.downloads == [names[0]]
+    assert VIN not in connector._bootstrapped  # pylint: disable=protected-access
+
+    # A new file arrives before the retry; the first one must not be fetched again.
+    fake.listing = names + ["20260530104500_%s.zip" % VIN]
+    connector._update_vehicle(VIN)  # pylint: disable=protected-access
+
+    assert fake.downloads == [names[0], names[1], names[2], fake.listing[-1]]
+    assert VIN in connector._bootstrapped  # pylint: disable=protected-access
+    assert connector._bootstrap_partial == {}  # pylint: disable=protected-access
+
+
+def test_bootstrap_resume_drops_files_that_left_the_portal_window(connector):
+    """Files downloaded before a 429 that are no longer listed on the retry are
+    not merged back in: the bootstrap follows the current listing."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    payload = json.load(open(SAMPLE, "r", encoding="utf-8"))
+    gone = "20260530100000_%s.zip" % VIN
+    kept = "20260530101500_%s.zip" % VIN
+    merged_inputs = []
+    original_merge = Dataset.merge
+
+    class _FakeClient:
+        def __init__(self):
+            self.listing = [gone, kept]
+            self.limited = True
+
+        def list_datasets(self, vin, identifier):
+            return [{"name": n, "createdOn": "2026-05-30T10:%s:00Z" % n[10:12]} for n in self.listing]
+
+        def download_dataset(self, vin, identifier, name):
+            if name == kept and self.limited:
+                self.limited = False
+                raise TooManyRequestsError("Download -> HTTP 429")
+            return payload
+
+    fake = _FakeClient()
+    connector.client = fake
+    connector._identifiers[VIN] = "ident"  # pylint: disable=protected-access
+    with pytest.raises(TooManyRequestsError):
+        connector._update_vehicle(VIN)  # pylint: disable=protected-access
+    assert gone in connector._bootstrap_partial[VIN]  # pylint: disable=protected-access
+
+    fake.listing = [kept]
+    Dataset.merge = staticmethod(lambda datasets: merged_inputs.append(len(datasets)) or original_merge(datasets))
+    try:
+        connector._update_vehicle(VIN)  # pylint: disable=protected-access
+    finally:
+        Dataset.merge = original_merge
+    assert merged_inputs == [1]
+
+
+def test_background_loop_backs_off_on_rate_limit(connector):
+    """The loop honours Retry-After (with a one-minute floor) and falls back to
+    15 minutes when the portal sends none."""
+    waits = []
+
+    class _Stop:
+        def __init__(self, rounds):
+            self.rounds = rounds
+
+        def clear(self):
+            pass
+
+        def is_set(self):
+            return self.rounds <= 0
+
+        def set(self):
+            self.rounds = 0
+
+        def wait(self, seconds):
+            waits.append(seconds)
+            self.rounds -= 1
+
+    for retry_after, expected in ((None, 900), (120, 120), (5, 60)):
+        def _limited(retry_after=retry_after):
+            raise TooManyRequestsError("HTTP 429", retry_after=retry_after)
+        connector.fetch_all = _limited
+        connector._stop_event = _Stop(1)  # pylint: disable=protected-access
+        connector._background_loop()  # pylint: disable=protected-access
+        assert waits[-1] == expected
+
+
 def test_charge_type_rate_and_remaining_time_mapped(connector):
     """The curated charging fields ported from the HA integration (charge type,
     charge rate, remaining time) map onto native CarConnectivity attributes."""
@@ -588,9 +765,10 @@ def test_no_content_latest_interval_reschedules_to_next_interval(connector):
     assert connector.interval.value > timedelta(minutes=10)
 
 
-def test_no_datasets_at_all_retries_soon(connector):
+def test_no_datasets_at_all_uses_configured_interval(connector):
     """An empty listing (e.g. still provisioning) has no cadence to schedule
-    from, so the connector falls back to the short retry interval."""
+    from, so the connector falls back to its configured polling interval rather
+    than polling every minute indefinitely (PR #43)."""
     garage = connector.car_connectivity.garage
     vehicle = VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector)
     garage.add_vehicle(VIN, vehicle)
@@ -606,7 +784,22 @@ def test_no_datasets_at_all_retries_soon(connector):
     connector.client = _FakeClient()
     connector.update_vehicles()
 
+    assert connector.interval.value == timedelta(seconds=connector.active_config["interval"])
+
+
+def test_overdue_dataset_keeps_short_retry(connector):
+    """A late delivery has a cadence to catch up with: keep the one-minute retry
+    so it is picked up as soon as it lands."""
+    connector._reschedule([datetime.now(tz=timezone.utc) - timedelta(minutes=1)])  # pylint: disable=protected-access
+
     assert connector.interval.value == timedelta(minutes=1)
+
+
+def test_future_dataset_target_keeps_cadence_schedule(connector):
+    """A future delivery target still takes precedence over any fallback."""
+    connector._reschedule([datetime.now(tz=timezone.utc) + timedelta(minutes=5)])  # pylint: disable=protected-access
+
+    assert timedelta(minutes=4, seconds=59) < connector.interval.value <= timedelta(minutes=5)
 
 
 def test_dataset_merge_latest_per_field():

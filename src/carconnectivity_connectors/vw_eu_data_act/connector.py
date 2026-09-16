@@ -65,6 +65,10 @@ LOG_API: logging.Logger = logging.getLogger("carconnectivity.connectors.vw_eu_da
 DATASET_INTERVAL = timedelta(minutes=15)
 POST_DATASET_BUFFER = timedelta(seconds=45)
 RETRY_INTERVAL = timedelta(minutes=1)
+# Back-off after an HTTP 429 when the portal sends no usable Retry-After, and the
+# floor applied to one it does send, so a tiny value cannot become a hot loop.
+RATE_LIMIT_BACKOFF = timedelta(minutes=15)
+RATE_LIMIT_MIN_BACKOFF = timedelta(minutes=1)
 MIN_INTERVAL = timedelta(seconds=60)
 
 # Map the portal's charge-state enum to the generic CarConnectivity enum.
@@ -445,6 +449,9 @@ class Connector(BaseConnector):
         self._merged_datasets: Dict[str, Dataset] = {}
         # VINs whose on-demand ('all') historical recon dump has already been written.
         self._historical_done: "set[str]" = set()
+        # Datasets already downloaded by a bootstrap that a rate limit interrupted,
+        # by VIN then file name, so the next attempt resumes instead of starting over.
+        self._bootstrap_partial: Dict[str, Dict[str, Dataset]] = {}
         # Set of field names already observed per VIN (used to detect new/unmapped sensors).
         self._observed_fields: Dict[str, set] = {}
 
@@ -562,9 +569,12 @@ class Connector(BaseConnector):
                         interval = self.interval.value.total_seconds()
                     raise
             except TooManyRequestsError as err:
-                LOG.error('Too many requests from your account (%s). Will try again after 15 minutes', str(err))
+                backoff = RATE_LIMIT_BACKOFF
+                if err.retry_after:
+                    backoff = max(timedelta(seconds=err.retry_after), RATE_LIMIT_MIN_BACKOFF)
+                LOG.error('Too many requests from your account (%s). Will try again after %s', str(err), backoff)
                 self.connection_state._set_value(value=ConnectionState.ERROR)  # pylint: disable=protected-access
-                self._stop_event.wait(900)
+                self._stop_event.wait(backoff.total_seconds())
             except (RetrievalError, ApiError) as err:
                 # A failed poll (transient network/DNS blip, a stale data-request
                 # identifier, etc.) should recover on the next short cycle rather
@@ -800,22 +810,38 @@ class Connector(BaseConnector):
             self._historical_done.add(vin)
             LOG.info('Historical on-demand export for %s written to %s (%d data points) for inspection.',
                      vin, os.path.abspath(path), len(payload.get('Data', []) if isinstance(payload, dict) else []))
+        except TooManyRequestsError:
+            # A RetrievalError subclass: it must reach the back-off, not be swallowed below.
+            raise
         except (ApiError, RetrievalError, OSError, ValueError) as err:
             LOG.debug('Historical recon %s failed (will retry next cycle): %s', vin, err)
 
     def _bootstrap_vehicle(self, vin: str, identifier: str, listing: list) -> None:
         """Download all available ZIP datasets for ``vin``, merge chronologically,
         map the merged result, and mark the vehicle as bootstrapped."""
-        LOG.info('Bootstrapping vehicle %s: downloading %d datasets', vin, len(listing))
-        datasets: list = []
+        downloaded = self._bootstrap_partial.setdefault(vin, {})
+        LOG.info('Bootstrapping vehicle %s: downloading %d datasets (%d already downloaded)',
+                 vin, len(listing), sum(1 for entry in listing if entry['name'] in downloaded))
         for entry in listing:
             name = entry['name']
+            if name in downloaded:
+                continue
             try:
                 payload = self.client.download_dataset(vin, identifier, name)
-                datasets.append(Dataset.from_json(payload))
+                downloaded[name] = Dataset.from_json(payload)
                 LOG.debug('Bootstrap %s: downloaded %s', vin, name)
+            except TooManyRequestsError:
+                # Keep what was downloaded: after the back-off the next attempt only
+                # fetches the rest instead of re-downloading everything.
+                LOG.info('Bootstrap %s: rate limited after %d of %d datasets; resuming after the back-off',
+                         vin, sum(1 for entry in listing if entry['name'] in downloaded), len(listing))
+                raise
             except ApiError as err:
                 LOG.warning('Bootstrap %s: failed to download %s: %s', vin, name, err)
+        # Follow the current listing, oldest first: files that rolled out of the
+        # portal window since an interrupted attempt are dropped here.
+        datasets = [downloaded[entry['name']] for entry in listing if entry['name'] in downloaded]
+        self._bootstrap_partial.pop(vin, None)
         if not datasets:
             LOG.warning('Bootstrap %s: no datasets could be downloaded', vin)
             self._bootstrapped.add(vin)
@@ -1380,14 +1406,24 @@ class Connector(BaseConnector):
     # -- scheduling --------------------------------------------------------
 
     def _reschedule(self, next_polls: "List[datetime]") -> None:
-        """Set the next interval ~15 min after the newest dataset, else short retry."""
-        if next_polls:
-            target = min(next_polls)
-            delta = target - datetime.now(tz=timezone.utc)
-            if delta > MIN_INTERVAL:
-                self.interval._set_value(delta)  # pylint: disable=protected-access
-                LOG.debug('Next refresh in %s', delta)
-                return
+        """Set the next interval ~15 min after the newest dataset.
+
+        An overdue delivery keeps the short retry so it is picked up as soon as it
+        lands. With nothing dated to schedule from (empty listing, missing
+        identifier) there is no cadence to catch, so the configured interval is
+        used rather than polling every minute indefinitely (PR #43).
+        """
+        if not next_polls:
+            base_interval = timedelta(seconds=self.active_config['interval'])
+            self.interval._set_value(base_interval)  # pylint: disable=protected-access
+            LOG.debug('No dataset to schedule from; retrying in configured interval %s', base_interval)
+            return
+        target = min(next_polls)
+        delta = target - datetime.now(tz=timezone.utc)
+        if delta > MIN_INTERVAL:
+            self.interval._set_value(delta)  # pylint: disable=protected-access
+            LOG.debug('Next refresh in %s', delta)
+            return
         self.interval._set_value(RETRY_INTERVAL)  # pylint: disable=protected-access
         LOG.debug('Next dataset overdue; retrying in %s', RETRY_INTERVAL)
 
