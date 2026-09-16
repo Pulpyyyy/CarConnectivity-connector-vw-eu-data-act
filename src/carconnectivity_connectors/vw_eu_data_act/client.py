@@ -14,11 +14,14 @@ import logging
 import re
 import uuid
 import zipfile
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
+from carconnectivity.errors import TooManyRequestsError
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -79,6 +82,34 @@ class ApiError(Exception):
 
 class AuthError(ApiError):
     """Authentication failed or session expired."""
+
+
+def _retry_after_seconds(response: requests.Response) -> Optional[int]:
+    """Seconds requested by a ``Retry-After`` header (delta or HTTP date), if any."""
+    raw = (response.headers.get("Retry-After") or "").strip()
+    if raw.isdigit():
+        return int(raw)
+    if raw:
+        try:
+            delta = parsedate_to_datetime(raw) - datetime.now(tz=timezone.utc)
+        except (TypeError, ValueError):
+            return None
+        return max(int(delta.total_seconds()), 0)
+    return None
+
+
+def _raise_for_status(response: requests.Response, context: str) -> None:
+    """Translate an HTTP error status into the connector's exceptions.
+
+    HTTP 429 becomes ``TooManyRequestsError`` so the background loop backs off
+    instead of retrying within a minute; real 429s were seen on both the listing
+    and the download endpoint (PR #43).
+    """
+    if response.status_code == 429:
+        LOG.debug("%s -> HTTP 429, Retry-After=%r", context, response.headers.get("Retry-After"))
+        raise TooManyRequestsError(f"{context} -> HTTP 429", retry_after=_retry_after_seconds(response))
+    if response.status_code >= 400:
+        raise ApiError(f"{context} -> HTTP {response.status_code}")
 
 
 class _FormParser(HTMLParser):
@@ -480,8 +511,7 @@ class EudaApiClient:
             self._logged_in = False
             self.login()
             return self._get_json(url, headers=headers, _retry=False)
-        if resp.status_code >= 400:
-            raise ApiError(f"GET {url} -> HTTP {resp.status_code}")
+        _raise_for_status(resp, f"GET {url}")
         try:
             return resp.json()
         except ValueError as err:
@@ -543,8 +573,7 @@ class EudaApiClient:
             self._logged_in = False
             self.login()
             resp = self._session_get(url, headers=headers)
-        if resp.status_code >= 400:
-            raise ApiError(f"Download {name} -> HTTP {resp.status_code}")
+        _raise_for_status(resp, f"Download {name}")
         return self._unzip_json(resp.content, name)
 
     @staticmethod
