@@ -152,6 +152,11 @@ def _created_on(entry: dict) -> "Optional[datetime]":
     return parsed if parsed is not None else _filename_timestamp(entry.get("name", ""))
 
 
+# Stored stamps less than this past the incoming capture time are _stamp's own
+# microsecond nudges on that capture, not a newer measurement.
+_NUDGE_WINDOW = timedelta(milliseconds=1)
+
+
 def _stamp(attr, value, measured: "Optional[datetime]", unit=None) -> None:
     """Set a measured attribute value without letting core swap in the wall clock.
 
@@ -166,14 +171,20 @@ def _stamp(attr, value, measured: "Optional[datetime]", unit=None) -> None:
     stamp itself (mikrohard#44, tillsteinbach/CarConnectivity#110).
 
     So: nothing new under an unchanged capture time -> no write at all; a
-    changed value under an unchanged capture time -> nudge ``measured`` by one
-    microsecond so core keeps a real measurement time. Never pass ``None``
-    here: core would store the clock for that too.
+    changed value under an unchanged capture time -> nudge ``measured`` one
+    microsecond past the stored stamp so core keeps a real measurement time.
+    A stored stamp already nudged still belongs to that capture: compared
+    as-is, the next delivery under the same capture time would be refused as
+    "Value from the past" and a further change dropped (#44 follow-up). The
+    portal's capture times carry at most milliseconds, so anything less than
+    one millisecond past ``measured`` can only be our own nudge. Never pass
+    ``None`` here: core would store the clock for that too.
     """
-    if measured is not None and attr.last_updated == measured:
+    if measured is not None and attr.last_updated is not None \
+            and timedelta(0) <= attr.last_updated - measured < _NUDGE_WINDOW:
         if attr.value == value and (unit is None or attr.unit == unit):
             return
-        measured = measured + timedelta(microseconds=1)
+        measured = attr.last_updated + timedelta(microseconds=1)
     attr._set_value(value=value, measured=measured, unit=unit)  # pylint: disable=protected-access
 
 
@@ -216,6 +227,8 @@ KNOWN_MAPPED_FIELDS: set[str] = {
     'maintenance_interval_distance_until_inspection',
     'maintenance_interval_distance_until_oil_change',
     'outside_temperature',
+    # Known but deliberately unmapped: a configured AC duration, not a countdown
+    # (see the climatisation block of _map_dataset).
     'remaining_climate_time',
     'remaining_climatisation_time',
     # Flat-format charging + consumption (mapped in _map_electric).
@@ -1022,15 +1035,16 @@ class Connector(BaseConnector):
         if outside is not None:
             _stamp(vehicle.outside_temperature, value=outside, measured=captured_at, unit=Temperature.C)
 
-        # Remaining climatisation time -> estimated completion date. The dotted
-        # format delivers "<seconds>s"; the flat PHEV format delivers integer
-        # minutes (remaining_climatisation_time).
-        clim_seconds = dataset.value_of('remaining_climate_time')
+        # Remaining climatisation time -> estimated completion date, from the flat
+        # format's remaining_climatisation_time (minutes, "Remaining time for which
+        # climatisations will run"). The dotted remaining_climate_time is not a
+        # countdown: the data dictionary defines it as how long the AC will run
+        # once started ("normally 30 minutes", "There is not countdown"), and its
+        # charging-job copies say nothing of whether it runs, so capture time plus
+        # that duration moved the end date forward on every delivery (#44
+        # follow-up). It stays unmapped.
         clim_minutes = dataset.value_of('remaining_climatisation_time')
-        if clim_seconds is not None:
-            _stamp(vehicle.climatization.estimated_date_reached,
-                value=date_anchor + timedelta(seconds=clim_seconds), measured=captured_at)
-        elif clim_minutes is not None:
+        if clim_minutes is not None:
             _stamp(vehicle.climatization.estimated_date_reached,
                 value=date_anchor + timedelta(minutes=clim_minutes), measured=captured_at)
 

@@ -229,6 +229,65 @@ class DataPoint:
         return resolve_enum_index(self.field_name, parse_value(self.raw_value))
 
 
+# Dotted report fields that the official continuous data dictionary (v1.0.0,
+# 2025-09-11) lists under four keys: one generic key, described as 'The <type>
+# value of "..."', and three copies carried by charging-job reports. Every
+# steady-state delivery we hold carries only the generic key; the copies show up
+# during charging sessions, pinned to the job, and can contradict it (#44
+# follow-up: soc 76 generic vs 34 copy, current_charge_state NOT_READY generic
+# vs READY copy). So the copies below only stand in when nothing else is there.
+# Generic keys, for reference: soc 506cb83e, charge_power c8cb205f, charge_rate
+# 1efb6000, charge_rate_unit 9c83ccaa, remaining_charging_time_complete
+# 7405c11f, current_charge_state a08cca2b, charge_type a5fa0f82.
+REPORT_COPY_KEYS = {
+    "battery_state_report.soc": frozenset({
+        "93b55324-6628-36df-8f76-8eba797fc59c",
+        "7bddd5e7-43a4-3878-bd63-9502782f77a5",
+        "bd4b6d50-b574-31e6-8141-8787ca5fec8c",
+    }),
+    "battery_state_report.charge_power": frozenset({
+        "44ed0d61-98c4-36df-b860-b077929a5797",
+        "8087d3b7-03bd-350a-95ef-bd8cb3ba20fa",
+        "885d1abd-799d-344a-bf02-0d07c6d6eebf",
+    }),
+    "battery_state_report.charge_rate": frozenset({
+        "9e366e14-a8ce-30b4-a204-b573596d1dbf",
+        "0c60a14f-116d-3ccd-b551-940a0814364e",
+        "1edd4c7f-90b3-3ca4-a748-3b78132aab1d",
+    }),
+    "battery_state_report.charge_rate_unit": frozenset({
+        "f01dccee-9a1a-3db6-8a99-4e483c604b4c",
+        "9ca09c8a-0b43-323c-8ce1-d757480c928c",
+        "1f9c6e86-b4d5-3eb9-8bb2-886298c24a06",
+    }),
+    "battery_state_report.remaining_charging_time_complete": frozenset({
+        "cad65f6f-17c5-377b-b030-821ffaf27dd5",
+        "7b149fa0-1cae-35e3-9f81-49656d2393b8",
+        "c32ae9c8-b3c1-3334-865e-ddce83159935",
+    }),
+    "charging_state_report.current_charge_state": frozenset({
+        "96c211b4-f8fb-3f40-b7cf-6a1cd12cce6d",
+        "3581f1e0-580b-3f18-aa73-6fbf037b841e",
+        "0811aa96-26d8-3d5f-8bd7-77be06612d85",
+    }),
+    "charging_state_report.charge_type": frozenset({
+        "f994c025-a69f-39ae-8860-9cb9a2ea9ed8",
+        "b942e990-6a4e-351b-81ce-84e27d13d97a",
+        "33bb1490-adbb-3a14-9abf-e68417d46f0b",
+    }),
+}
+
+# Fields whose copies mean something else than the live reading, so they never
+# stand in for it: the dictionary describes the battery_state_report.soc copies
+# as "State of Charging when charging is started".
+REPORT_COPIES_DIFFER = {"battery_state_report.soc"}
+
+
+def _is_report_copy(dp: "DataPoint") -> bool:
+    """Whether ``dp`` is a known charging-job copy of a report field."""
+    return dp.key in REPORT_COPY_KEYS.get(dp.field_name, ())
+
+
 def _freshness_key(dp: "DataPoint"):
     """Sort key for ``min()`` that picks the freshest data point.
 
@@ -308,7 +367,9 @@ class Dataset:
                 if dp is None:
                     continue
                 cur = latest.get(field_name)
-                if cur is None or _at_least_as_fresh(dp, cur):
+                if cur is None or _is_report_copy(cur) and not _is_report_copy(dp):
+                    latest[field_name] = dp
+                elif _is_report_copy(dp) == _is_report_copy(cur) and _at_least_as_fresh(dp, cur):
                     latest[field_name] = dp
             if ds.captured_at and (merged_captured is None or ds.captured_at > merged_captured):
                 merged_captured = ds.captured_at
@@ -329,8 +390,16 @@ class Dataset:
         *stable* choice, so a mapped attribute consistently tracks the same data
         point across refreshes instead of flip-flopping when the portal reshuffles
         the array.
+
+        Known charging-job copies (``REPORT_COPY_KEYS``) are only a fallback
+        when no other reading of the field is present, and never one for
+        ``REPORT_COPIES_DIFFER``.
         """
         matches = [dp for dp in self.points.values() if dp.field_name == field_name]
+        if field_name in REPORT_COPY_KEYS:
+            live = [dp for dp in matches if not _is_report_copy(dp)]
+            if live or field_name in REPORT_COPIES_DIFFER:
+                matches = live
         return min(matches, key=_freshness_key) if matches else None
 
     def value_of(self, field_name: str):
