@@ -2069,6 +2069,30 @@ def test_merge_keeps_live_reading_over_a_later_job_copy():
     assert merged.value_of("charging_state_report.current_charge_state") == "CHARGE_STATE_NOT_READY_FOR_CHARGING"
 
 
+def test_remaining_climate_time_is_not_a_countdown(connector):
+    """#44 follow-up: the dotted remaining_climate_time is the AC duration once
+    started, not a countdown; mapped as capture time + 1800 s it moved the
+    climatisation end date forward on every delivery, AC running or not."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    connector._map_dataset(VIN, Dataset.from_json(_copies_payload()))  # pylint: disable=protected-access
+    assert garage.get_vehicle(VIN).climatization.estimated_date_reached.value is None
+
+
+def test_remaining_climatisation_time_still_maps(connector):
+    """The flat format's remaining_climatisation_time is a real countdown in
+    minutes and keeps feeding the climatisation end date."""
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    captured = datetime(2026, 9, 23, 14, 51, 7, tzinfo=timezone.utc)
+    ds = Dataset.from_json({"vin": VIN, "Data": [
+        {"key": "k1", "dataFieldName": "remaining_climatisation_time", "value": "10",
+         "timestampUtc": "2026-09-23T14:51:07Z"},
+    ]})
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+    assert garage.get_vehicle(VIN).climatization.estimated_date_reached.value == captured + timedelta(minutes=10)
+
+
 def test_measured_falls_back_to_created_on_never_none(connector):
     """A dataset with no capture time at all must be stamped with the delivery's
     createdOn, not left to core, which would store the wall clock and then refuse

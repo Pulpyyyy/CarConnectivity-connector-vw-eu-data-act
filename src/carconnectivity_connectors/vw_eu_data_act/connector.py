@@ -227,6 +227,8 @@ KNOWN_MAPPED_FIELDS: set[str] = {
     'maintenance_interval_distance_until_inspection',
     'maintenance_interval_distance_until_oil_change',
     'outside_temperature',
+    # Known but deliberately unmapped: a configured AC duration, not a countdown
+    # (see the climatisation block of _map_dataset).
     'remaining_climate_time',
     'remaining_climatisation_time',
     # Flat-format charging + consumption (mapped in _map_electric).
@@ -1033,15 +1035,16 @@ class Connector(BaseConnector):
         if outside is not None:
             _stamp(vehicle.outside_temperature, value=outside, measured=captured_at, unit=Temperature.C)
 
-        # Remaining climatisation time -> estimated completion date. The dotted
-        # format delivers "<seconds>s"; the flat PHEV format delivers integer
-        # minutes (remaining_climatisation_time).
-        clim_seconds = dataset.value_of('remaining_climate_time')
+        # Remaining climatisation time -> estimated completion date, from the flat
+        # format's remaining_climatisation_time (minutes, "Remaining time for which
+        # climatisations will run"). The dotted remaining_climate_time is not a
+        # countdown: the data dictionary defines it as how long the AC will run
+        # once started ("normally 30 minutes", "There is not countdown"), and its
+        # charging-job copies say nothing of whether it runs, so capture time plus
+        # that duration moved the end date forward on every delivery (#44
+        # follow-up). It stays unmapped.
         clim_minutes = dataset.value_of('remaining_climatisation_time')
-        if clim_seconds is not None:
-            _stamp(vehicle.climatization.estimated_date_reached,
-                value=date_anchor + timedelta(seconds=clim_seconds), measured=captured_at)
-        elif clim_minutes is not None:
+        if clim_minutes is not None:
             _stamp(vehicle.climatization.estimated_date_reached,
                 value=date_anchor + timedelta(minutes=clim_minutes), measured=captured_at)
 

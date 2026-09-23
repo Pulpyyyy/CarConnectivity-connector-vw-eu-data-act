@@ -171,7 +171,7 @@ delivery's `createdOn` is used as the measurement time rather than leaving it to
 | `maintenance_interval__time_until_inspection` | `maintenance.inspection_due_at` | signed countdown → due date |
 | `maintenance_interval__time_until_oil_change` | `maintenance.oil_service_due_at` | |
 | `maintenance_interval_distance_until_*` | `maintenance.*_due_after` (km) | |
-| `remaining_climate_time` / `remaining_climatisation_time` | `climatization.estimated_date_reached` | seconds (dotted) / minutes (flat) |
+| `remaining_climatisation_time` | `climatization.estimated_date_reached` | minutes (flat). The dotted `remaining_climate_time` is left unmapped: the data dictionary defines it as how long the AC runs once started, not a countdown |
 
 ### Electric drive (`secondary` on PHEV, `primary` on EV)
 
