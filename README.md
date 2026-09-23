@@ -177,7 +177,7 @@ delivery's `createdOn` is used as the measurement time rather than leaving it to
 
 | EU Data Act field | CarConnectivity attribute | Notes |
 |---|---|---|
-| `battery_state_report.soc` / `state_of_charge` / `battery_level_HV.value` | `drive.level` (%) | `battery_level_HV` is the fallback when the named SoC fields are absent (reduced MEB deliveries) |
+| `battery_state_report.soc` / `state_of_charge` / `battery_level_HV.value` | `drive.level` (%) | `battery_level_HV` is the fallback when the named SoC fields are absent (reduced MEB deliveries). The charging-job copies of `battery_state_report.soc` are ignored: the data dictionary defines them as the SoC when charging started, not the current one |
 | `range` / `cruising_range_secondary_engine` | `drive.range` (km) | |
 | `long_term_data_average_electr_engine_consumption` | `drive.consumption` | kWh/1000km → kWh/100km |
 | `min_temperature` / `max_temperature` | `battery.temperature_min` / `temperature_max` (°C) | |
@@ -193,6 +193,11 @@ delivery's `createdOn` is used as the measurement time rather than leaving it to
 | `oil_level_actual_level` | `drive.oil_level` (%) | requires a carconnectivity core with `oil_level`; skipped on older cores |
 
 ### Charging
+
+During a charging session the dotted `battery_state_report.*` / `charging_state_report.*` fields
+also arrive as copies carried by the charging-job reports, under their own keys and sometimes
+contradicting the live reading. The live key is read first; a copy is only used when the live
+reading is missing.
 
 | EU Data Act field | CarConnectivity attribute | Notes |
 |---|---|---|

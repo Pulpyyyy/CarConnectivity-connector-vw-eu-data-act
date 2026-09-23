@@ -2009,6 +2009,66 @@ def test_nudged_stamp_still_counts_as_the_same_capture(connector):
     assert vehicle.odometer.value == 53545
 
 
+COPIES = os.path.join(os.path.dirname(__file__), "meb_charging_report_copies_dataset.json")
+SOC_LIVE_KEY = "506cb83e-f99f-3af3-bbeb-0429b69a78d9"
+CHARGE_STATE_LIVE_KEY = "a08cca2b-ed42-37bc-b160-d015ce205d3d"
+
+
+def _copies_payload(*drop_keys: str) -> dict:
+    """The #44 reporter's 2026-09-18 ID.4 delivery, taken mid charging session,
+    optionally without the entries carrying ``drop_keys``."""
+    with open(COPIES, "r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    return {**payload, "Data": [e for e in payload["Data"] if e["key"] not in drop_keys]}
+
+
+def test_report_copies_premise():
+    """Premise lock: the delivery carries the live readings and the charging-job
+    copies side by side, with conflicting values."""
+    by_key = {e["key"]: e["value"] for e in _copies_payload()["Data"]}
+    assert by_key[SOC_LIVE_KEY] == "76"
+    assert by_key["7bddd5e7-43a4-3878-bd63-9502782f77a5"] == "34"  # SoC when charging started
+    assert by_key[CHARGE_STATE_LIVE_KEY] == "CHARGE_STATE_NOT_READY_FOR_CHARGING"
+    assert by_key["3581f1e0-580b-3f18-aa73-6fbf037b841e"] == "CHARGE_STATE_READY_FOR_CHARGING"
+
+
+def test_live_report_reading_wins_over_job_copies():
+    """#44 follow-up: the smallest-UUID tie-break picked the READY copy of
+    current_charge_state over the live NOT_READY reading."""
+    ds = Dataset.from_json(_copies_payload())
+    assert ds.value_of("battery_state_report.soc") == 76
+    assert ds.value_of("charging_state_report.current_charge_state") == "CHARGE_STATE_NOT_READY_FOR_CHARGING"
+
+
+def test_soc_copy_never_stands_in_for_the_live_soc(connector):
+    """A delivery holding only the 'SoC when charging is started' copy must not
+    become the vehicle SoC (the reporter's history sat at 34 % for hours): the
+    connector falls back to battery_level_HV.value instead."""
+    ds = Dataset.from_json(_copies_payload(SOC_LIVE_KEY))
+    assert ds.value_of("battery_state_report.soc") is None
+
+    garage = connector.car_connectivity.garage
+    garage.add_vehicle(VIN, VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector))
+    connector._map_dataset(VIN, ds)  # pylint: disable=protected-access
+    assert garage.get_vehicle(VIN).get_electric_drive().level.value == 76
+
+
+def test_job_copy_is_a_fallback_for_same_meaning_fields():
+    """Copies that carry the same meaning still stand in when the live reading
+    is missing, so no value is lost."""
+    ds = Dataset.from_json(_copies_payload(CHARGE_STATE_LIVE_KEY))
+    assert ds.value_of("charging_state_report.current_charge_state") == "CHARGE_STATE_READY_FOR_CHARGING"
+
+
+def test_merge_keeps_live_reading_over_a_later_job_copy():
+    """Bootstrap merge: a later dataset carrying only a job copy does not
+    replace the live reading from an earlier one."""
+    live = Dataset.from_json(_copies_payload())
+    copy_only = Dataset.from_json(_copies_payload(CHARGE_STATE_LIVE_KEY))
+    merged = Dataset.merge([live, copy_only])
+    assert merged.value_of("charging_state_report.current_charge_state") == "CHARGE_STATE_NOT_READY_FOR_CHARGING"
+
+
 def test_measured_falls_back_to_created_on_never_none(connector):
     """A dataset with no capture time at all must be stamped with the delivery's
     createdOn, not left to core, which would store the wall clock and then refuse
