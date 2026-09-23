@@ -623,6 +623,41 @@ def test_background_loop_backs_off_on_rate_limit(connector):
         assert waits[-1] == expected
 
 
+def test_background_loop_backs_off_on_login_failures(connector):
+    """#49: a login failure does not heal by itself, so consecutive failures
+    back off exponentially (1 min doubling, capped at 1 h) instead of rerunning
+    the login every minute; a successful update resets the back-off."""
+    waits = []
+    outcomes = iter([False] * 8 + [True, False])
+
+    class _Stop:
+        def __init__(self, rounds):
+            self.rounds = rounds
+
+        def clear(self):
+            pass
+
+        def is_set(self):
+            return self.rounds <= 0
+
+        def set(self):
+            self.rounds = 0
+
+        def wait(self, seconds):
+            waits.append(seconds)
+            self.rounds -= 1
+
+    def _attempt():
+        if not next(outcomes):
+            raise AuthError("Login failed - check email and password")
+    connector.fetch_all = _attempt
+    connector.update_vehicles = _attempt
+    connector._stop_event = _Stop(10)  # pylint: disable=protected-access
+    connector._background_loop()  # pylint: disable=protected-access
+    assert waits[:8] == [60, 120, 240, 480, 960, 1920, 3600, 3600]
+    assert waits[9] == 60
+
+
 def test_charge_type_rate_and_remaining_time_mapped(connector):
     """The curated charging fields ported from the HA integration (charge type,
     charge rate, remaining time) map onto native CarConnectivity attributes."""
@@ -1409,6 +1444,19 @@ def test_login_terms_interstitial_gets_specific_message():
                      status_code=200)
     with pytest.raises(AuthError, match="terms and conditions"):
         client._finish_login(resp)  # pylint: disable=protected-access
+
+
+def test_login_consent_interstitial_gets_specific_message():
+    """A consent question from the IdP (issue #49: marketing consent) is not a
+    credentials problem: the message must say so, name the consent kind and
+    keep the user id out of the log."""
+    client = _client_with_probe(200)
+    resp = _FakeResp("https://identity.vwgroup.io/signin-service/v1/consent/marketing/"
+                     "user-1234/xxx@apps_vw-dilab_com/0", status_code=200)
+    with pytest.raises(AuthError, match=r"consent question \(marketing\)") as excinfo:
+        client._finish_login(resp)  # pylint: disable=protected-access
+    assert "user-1234" not in str(excinfo.value)
+    assert "check email and password" not in str(excinfo.value)
 
 
 def test_login_probe_rejects_sessionless_login():

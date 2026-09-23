@@ -69,6 +69,9 @@ RETRY_INTERVAL = timedelta(minutes=1)
 # floor applied to one it does send, so a tiny value cannot become a hot loop.
 RATE_LIMIT_BACKOFF = timedelta(minutes=15)
 RATE_LIMIT_MIN_BACKOFF = timedelta(minutes=1)
+# Back-off after consecutive login failures: doubles from the first value, capped.
+AUTH_BACKOFF_MIN = timedelta(minutes=1)
+AUTH_BACKOFF_MAX = timedelta(hours=1)
 MIN_INTERVAL = timedelta(seconds=60)
 
 # Map the portal's charge-state enum to the generic CarConnectivity enum.
@@ -485,6 +488,8 @@ class Connector(BaseConnector):
         self._bootstrapped: set[str] = set()
         # Merged dataset per VIN tracking the latest value per field across all downloaded zips.
         self._merged_datasets: Dict[str, Dataset] = {}
+        # Consecutive login failures since the last successful update (auth back-off).
+        self._auth_failures: int = 0
         # VINs whose on-demand ('all') historical recon dump has already been written.
         self._historical_done: "set[str]" = set()
         # Datasets already downloaded by a bootstrap that a rate limit interrupted,
@@ -613,6 +618,18 @@ class Connector(BaseConnector):
                 LOG.error('Too many requests from your account (%s). Will try again after %s', str(err), backoff)
                 self.connection_state._set_value(value=ConnectionState.ERROR)  # pylint: disable=protected-access
                 self._stop_event.wait(backoff.total_seconds())
+            except AuthError as err:
+                # A login failure does not heal by itself (wrong password, terms
+                # or a consent question to answer in a browser): back off
+                # exponentially instead of rerunning the whole login every minute
+                # (#49: ~40,000 failed logins in four weeks against the VW
+                # identity service, which risks an account lock).
+                backoff = min(AUTH_BACKOFF_MIN * 2 ** min(self._auth_failures, 6), AUTH_BACKOFF_MAX)
+                self._auth_failures += 1
+                self.interval._set_value(backoff)  # pylint: disable=protected-access
+                LOG.error('Login failed (%s). Will try again after %s', str(err), backoff)
+                self.connection_state._set_value(value=ConnectionState.ERROR)  # pylint: disable=protected-access
+                self._stop_event.wait(backoff.total_seconds())
             except (RetrievalError, ApiError) as err:
                 # A failed poll (transient network/DNS blip, a stale data-request
                 # identifier, etc.) should recover on the next short cycle rather
@@ -633,6 +650,7 @@ class Connector(BaseConnector):
                 self.connection_state._set_value(value=ConnectionState.ERROR)  # pylint: disable=protected-access
                 self._stop_event.wait(interval)
             else:
+                self._auth_failures = 0
                 self.connection_state._set_value(value=ConnectionState.CONNECTED)  # pylint: disable=protected-access
                 if self.healthy.value is not True:
                     self.healthy._set_value(value=True)  # pylint: disable=protected-access
