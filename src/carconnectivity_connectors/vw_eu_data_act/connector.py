@@ -152,6 +152,11 @@ def _created_on(entry: dict) -> "Optional[datetime]":
     return parsed if parsed is not None else _filename_timestamp(entry.get("name", ""))
 
 
+# Stored stamps less than this past the incoming capture time are _stamp's own
+# microsecond nudges on that capture, not a newer measurement.
+_NUDGE_WINDOW = timedelta(milliseconds=1)
+
+
 def _stamp(attr, value, measured: "Optional[datetime]", unit=None) -> None:
     """Set a measured attribute value without letting core swap in the wall clock.
 
@@ -166,14 +171,20 @@ def _stamp(attr, value, measured: "Optional[datetime]", unit=None) -> None:
     stamp itself (mikrohard#44, tillsteinbach/CarConnectivity#110).
 
     So: nothing new under an unchanged capture time -> no write at all; a
-    changed value under an unchanged capture time -> nudge ``measured`` by one
-    microsecond so core keeps a real measurement time. Never pass ``None``
-    here: core would store the clock for that too.
+    changed value under an unchanged capture time -> nudge ``measured`` one
+    microsecond past the stored stamp so core keeps a real measurement time.
+    A stored stamp already nudged still belongs to that capture: compared
+    as-is, the next delivery under the same capture time would be refused as
+    "Value from the past" and a further change dropped (#44 follow-up). The
+    portal's capture times carry at most milliseconds, so anything less than
+    one millisecond past ``measured`` can only be our own nudge. Never pass
+    ``None`` here: core would store the clock for that too.
     """
-    if measured is not None and attr.last_updated == measured:
+    if measured is not None and attr.last_updated is not None \
+            and timedelta(0) <= attr.last_updated - measured < _NUDGE_WINDOW:
         if attr.value == value and (unit is None or attr.unit == unit):
             return
-        measured = measured + timedelta(microseconds=1)
+        measured = attr.last_updated + timedelta(microseconds=1)
     attr._set_value(value=value, measured=measured, unit=unit)  # pylint: disable=protected-access
 
 

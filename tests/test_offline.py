@@ -1975,6 +1975,40 @@ def test_repeated_capture_time_never_becomes_a_clock_stamp(connector):
     assert vehicle.odometer.last_updated == datetime(2026, 9, 7, 6, 58, 49, tzinfo=timezone.utc)
 
 
+def test_nudged_stamp_still_counts_as_the_same_capture(connector):
+    """mikrohard#44 follow-up (reporter's log, 2026-09-23 18:03 -> 18:47 -> 19:01):
+    values changed under an unchanged capture time are stamped one microsecond
+    past it; the next delivery under that same capture time must be compared to
+    the capture, not refused as 'Value from the past' behind our own nudge."""
+    garage = connector.car_connectivity.garage
+    vehicle = VWEudaVehicle(vin=VIN, garage=garage, managing_connector=connector)
+    garage.add_vehicle(VIN, vehicle)
+    payload = _meb44_payload()
+    captured = datetime(2026, 9, 7, 6, 31, 49, tzinfo=timezone.utc)
+    connector._map_dataset(VIN, Dataset.from_json(payload))  # pylint: disable=protected-access
+    vehicle = garage.get_vehicle(VIN)
+
+    # 18:47: changed under the same capture time -> nudged.
+    connector._map_dataset(VIN, Dataset.from_json(_with(payload, **{"mileage.value": "53540"})))  # pylint: disable=protected-access
+    nudged = vehicle.odometer.last_updated
+    assert nudged == captured + timedelta(microseconds=1)
+
+    # 19:01, same values: nothing to write, the stamp stays put.
+    connector._map_dataset(VIN, Dataset.from_json(_with(payload, **{"mileage.value": "53540"})))  # pylint: disable=protected-access
+    assert vehicle.odometer.value == 53540
+    assert vehicle.odometer.last_updated == nudged
+
+    # 19:01, changed again: taken, still a measurement time, not the clock.
+    connector._map_dataset(VIN, Dataset.from_json(_with(payload, **{"mileage.value": "53545"})))  # pylint: disable=protected-access
+    assert vehicle.odometer.value == 53545
+    assert vehicle.odometer.last_updated == nudged + timedelta(microseconds=1)
+
+    # A genuinely older capture is still refused.
+    older = _with(payload, **{"mileage.value": "53500", "car_captured_time": "2026-09-07T06:31:48Z"})
+    connector._map_dataset(VIN, Dataset.from_json(older))  # pylint: disable=protected-access
+    assert vehicle.odometer.value == 53545
+
+
 def test_measured_falls_back_to_created_on_never_none(connector):
     """A dataset with no capture time at all must be stamped with the delivery's
     createdOn, not left to core, which would store the wall clock and then refuse
