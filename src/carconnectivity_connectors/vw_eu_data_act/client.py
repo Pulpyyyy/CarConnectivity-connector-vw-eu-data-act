@@ -414,6 +414,22 @@ class EudaApiClient:
                 "browser first, or set accept_terms_on_login). See connector issue #15."
             )
 
+        # The IdP can also stop the flow on a consent question, e.g.
+        # /signin-service/v1/consent/marketing/<user-id>/<client-id>/0 (issue
+        # #49). Credentials were accepted, so "check email and password" would
+        # send the user after a password that is fine. Such a consent is the
+        # account holder's own choice, so it is never answered here; the message
+        # names its kind but not the URL, which carries the user id.
+        path_segments = urlparse(landing).path.split("/")
+        if "signin-service" in path_segments and "consent" in path_segments:
+            kind_index = path_segments.index("consent") + 1
+            kind = path_segments[kind_index] if kind_index < len(path_segments) else ""
+            raise AuthError(
+                f"Login interrupted: the identity provider asks this account a consent question"
+                f"{f' ({kind})' if kind else ''}. Complete one login in a browser at "
+                f"{BASE_URL} and answer it. See connector issue #49."
+            )
+
         # Positively confirm success: a completed flow lands back on the portal
         # host (via /services/callbacklogin). Bad credentials re-render the
         # identity sign-in page (URL still on identity.vwgroup.io/signin-service).

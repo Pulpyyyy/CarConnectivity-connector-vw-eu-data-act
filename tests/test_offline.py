@@ -1411,6 +1411,19 @@ def test_login_terms_interstitial_gets_specific_message():
         client._finish_login(resp)  # pylint: disable=protected-access
 
 
+def test_login_consent_interstitial_gets_specific_message():
+    """A consent question from the IdP (issue #49: marketing consent) is not a
+    credentials problem: the message must say so, name the consent kind and
+    keep the user id out of the log."""
+    client = _client_with_probe(200)
+    resp = _FakeResp("https://identity.vwgroup.io/signin-service/v1/consent/marketing/"
+                     "user-1234/xxx@apps_vw-dilab_com/0", status_code=200)
+    with pytest.raises(AuthError, match=r"consent question \(marketing\)") as excinfo:
+        client._finish_login(resp)  # pylint: disable=protected-access
+    assert "user-1234" not in str(excinfo.value)
+    assert "check email and password" not in str(excinfo.value)
+
+
 def test_login_probe_rejects_sessionless_login():
     """If the authenticated probe answers 401/403, no session was established:
     the login must fail with a clear message instead of failing later with a
