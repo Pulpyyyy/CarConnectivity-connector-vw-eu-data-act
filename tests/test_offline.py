@@ -623,6 +623,41 @@ def test_background_loop_backs_off_on_rate_limit(connector):
         assert waits[-1] == expected
 
 
+def test_background_loop_backs_off_on_login_failures(connector):
+    """#49: a login failure does not heal by itself, so consecutive failures
+    back off exponentially (1 min doubling, capped at 1 h) instead of rerunning
+    the login every minute; a successful update resets the back-off."""
+    waits = []
+    outcomes = iter([False] * 8 + [True, False])
+
+    class _Stop:
+        def __init__(self, rounds):
+            self.rounds = rounds
+
+        def clear(self):
+            pass
+
+        def is_set(self):
+            return self.rounds <= 0
+
+        def set(self):
+            self.rounds = 0
+
+        def wait(self, seconds):
+            waits.append(seconds)
+            self.rounds -= 1
+
+    def _attempt():
+        if not next(outcomes):
+            raise AuthError("Login failed - check email and password")
+    connector.fetch_all = _attempt
+    connector.update_vehicles = _attempt
+    connector._stop_event = _Stop(10)  # pylint: disable=protected-access
+    connector._background_loop()  # pylint: disable=protected-access
+    assert waits[:8] == [60, 120, 240, 480, 960, 1920, 3600, 3600]
+    assert waits[9] == 60
+
+
 def test_charge_type_rate_and_remaining_time_mapped(connector):
     """The curated charging fields ported from the HA integration (charge type,
     charge rate, remaining time) map onto native CarConnectivity attributes."""
