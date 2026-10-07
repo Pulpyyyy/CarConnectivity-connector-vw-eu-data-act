@@ -7,7 +7,9 @@ the sample dataset shipped by the EU Data Act portal.
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 import pytest
 
@@ -1379,47 +1381,76 @@ def test_odometer_prefers_highest_slot(connector):
     assert garage.get_vehicle(VIN).odometer.value == 70908
 
 
-# --- login verdict (issue #29) ----------------------------------------------
+# --- login verdict (issues #29, #49 and VW's October 2026 login changes) ------
 
 PORTAL = "https://eu-data-act.drivesomethinggreater.com"
+IDENTITY = "https://identity.vwgroup.io"
+CALLBACK_URL = PORTAL + "/services/callbacklogin?state=ch__en__VOLKSWAGEN_PASSENGER_CARS&code=x"
+USER_PAGE = PORTAL + "/content/euda/ch/en/user.html"
+MARKETING_PAGE = IDENTITY + "/signin-service/v1/consent/marketing/user-1234/xxx@apps_vw-dilab_com/0"
 
 
 class _FakeResp:
-    """Minimal stand-in for requests.Response in login-verdict tests."""
+    """Minimal stand-in for requests.Response in login tests."""
 
-    def __init__(self, url, status_code=200, history=(), text=""):
+    def __init__(self, url, status_code=200, text="", headers=None, cookies=None):
         self.url = url
         self.status_code = status_code
-        self.history = list(history)
         self.text = text
+        self.headers = headers or {}
+        self.cookies = cookies or {}
 
 
-def _callback_hop():
-    return _FakeResp(PORTAL + "/services/callbacklogin?state=ch__en__VOLKSWAGEN_PASSENGER_CARS&code=x",
-                     status_code=302)
+def _redirect(url, location, cookies=None):
+    return _FakeResp(url, status_code=302, headers={"Location": location}, cookies=cookies)
 
 
-def _client_with_probe(status_code):
-    client = EudaApiClient(email="u", password="p")
-    client._session.get = lambda url, **kwargs: _FakeResp(url, status_code)
+def _callback_resp(cookies=None):
+    """The portal callback: sets access_token and redirects to the CMS page."""
+    return _redirect(CALLBACK_URL, USER_PAGE,
+                     cookies={"access_token": "tok"} if cookies is None else cookies)
+
+
+def _login_client(routes=None, accept=False):
+    """Client whose GETs are answered from ``routes`` (url without query ->
+    response) and recorded, so tests can assert what was (not) fetched."""
+    client = EudaApiClient(email="u", password="p", accept_terms_on_login=accept)
+    client.gets = []
+
+    def _get(url, **kwargs):
+        client.gets.append((url, kwargs))
+        return (routes or {})[url.split("?", 1)[0]]
+
+    client._session.get = _get
     return client
 
 
-def test_login_missing_landing_page_is_not_a_failure():
-    """A 4xx on the localized CMS landing page after the chain passed
-    /services/callbacklogin is cosmetic (the page does not exist for e.g.
-    country "ch", issue #29): the login must be treated as successful."""
-    client = _client_with_probe(200)
-    resp = _FakeResp(PORTAL + "/ch/en/user.html", status_code=404, history=[_callback_hop()])
-    client._finish_login(resp)  # pylint: disable=protected-access
+def test_login_callback_with_access_token_succeeds():
+    """The callback response setting access_token is the success verdict. Its
+    redirect to the localized CMS page (missing for e.g. "ch", issue #29) is
+    never followed, and no session probe is made afterwards."""
+    client = _login_client()
+    client._finish_login(_callback_resp())  # pylint: disable=protected-access
+    assert not client.gets
+
+
+def test_login_callback_without_access_token_fails():
+    client = _login_client()
+    with pytest.raises(AuthError, match="access_token cookie missing"):
+        client._finish_login(_callback_resp(cookies={}))  # pylint: disable=protected-access
+
+
+def test_login_callback_error_fails():
+    client = _login_client()
+    with pytest.raises(AuthError, match=r"callback rejected \(HTTP 401\)"):
+        client._finish_login(_FakeResp(CALLBACK_URL, status_code=401))  # pylint: disable=protected-access
 
 
 def test_login_4xx_without_callback_still_fails():
     """A 4xx at the end of a chain that never reached the portal callback is a
     real login failure and must keep raising AuthError."""
-    client = _client_with_probe(200)
-    resp = _FakeResp("https://identity.vwgroup.io/signin-service/v1/x/login/authenticate",
-                     status_code=400)
+    client = _login_client()
+    resp = _FakeResp(IDENTITY + "/signin-service/v1/x/login/authenticate", status_code=400)
     with pytest.raises(AuthError, match="Login rejected"):
         client._finish_login(resp)  # pylint: disable=protected-access
 
@@ -1427,55 +1458,155 @@ def test_login_4xx_without_callback_still_fails():
 def test_login_bad_credentials_still_detected():
     """Bad credentials re-render the identity sign-in page (HTTP 200, URL still
     on signin-service): detection must be unchanged."""
-    client = _client_with_probe(200)
-    resp = _FakeResp("https://identity.vwgroup.io/signin-service/v1/x/login/authenticate",
-                     status_code=200)
+    client = _login_client()
+    resp = _FakeResp(IDENTITY + "/signin-service/v1/x/login/authenticate", status_code=200)
     with pytest.raises(AuthError, match="check email and password"):
         client._finish_login(resp)  # pylint: disable=protected-access
+
+
+def test_login_stopping_on_portal_page_is_not_success():
+    """Only the callback proves the login: any other portal page is not enough,
+    and the message keeps the query (codes, ids) out."""
+    client = _login_client()
+    with pytest.raises(AuthError, match=r"did not complete \(ended at https://eu-data-act[^?]*/login\)"):
+        client._finish_login(_FakeResp(PORTAL + "/login?code=secret"))  # pylint: disable=protected-access
 
 
 def test_login_terms_interstitial_gets_specific_message():
     """The terms-and-conditions interstitial (issue #15) is a real login stop,
     but the generic "check email and password" message is misleading there: a
     dedicated message must point at the terms acceptance instead."""
-    client = _client_with_probe(200)
-    resp = _FakeResp("https://identity.vwgroup.io/signin-service/v1/x/terms-and-conditions"
-                     "?relayState=y&updated=dataprivacy",
-                     status_code=200)
+    client = _login_client()
+    resp = _FakeResp(IDENTITY + "/signin-service/v1/x/terms-and-conditions"
+                     "?relayState=y&updated=dataprivacy", status_code=200)
     with pytest.raises(AuthError, match="terms and conditions"):
         client._finish_login(resp)  # pylint: disable=protected-access
 
 
 def test_login_consent_interstitial_gets_specific_message():
-    """A consent question from the IdP (issue #49: marketing consent) is not a
-    credentials problem: the message must say so, name the consent kind and
-    keep the user id out of the log."""
-    client = _client_with_probe(200)
-    resp = _FakeResp("https://identity.vwgroup.io/signin-service/v1/consent/marketing/"
-                     "user-1234/xxx@apps_vw-dilab_com/0", status_code=200)
+    """A consent page the chain could not skip (issue #49) is not a credentials
+    problem: the message must say so, name the consent kind and keep the user
+    id out of the log."""
+    client = _login_client()
     with pytest.raises(AuthError, match=r"consent question \(marketing\)") as excinfo:
-        client._finish_login(resp)  # pylint: disable=protected-access
+        client._finish_login(_FakeResp(MARKETING_PAGE, status_code=200))  # pylint: disable=protected-access
     assert "user-1234" not in str(excinfo.value)
     assert "check email and password" not in str(excinfo.value)
 
 
-def test_login_probe_rejects_sessionless_login():
-    """If the authenticated probe answers 401/403, no session was established:
-    the login must fail with a clear message instead of failing later with a
-    confusing error on the first API call."""
-    client = _client_with_probe(401)
-    resp = _FakeResp(PORTAL + "/ch/en/user.html", status_code=404, history=[_callback_hop()])
-    with pytest.raises(AuthError, match="did not establish a session"):
-        client._finish_login(resp)  # pylint: disable=protected-access
+def test_login_redirects_stop_at_callback():
+    """Redirects are followed by hand (no automatic redirects) and stop at the
+    callback response: the localized CMS page is never fetched."""
+    callback = _callback_resp()
+    identity_callback = IDENTITY + "/oidc/v1/oauth/client/callback"
+    client = _login_client({
+        identity_callback: _redirect(identity_callback, CALLBACK_URL),
+        PORTAL + "/services/callbacklogin": callback,
+    })
+    start = _redirect(IDENTITY + "/signin-service/v1/x/login/authenticate",
+                      "/oidc/v1/oauth/client/callback?code=y")
+    assert client._follow_login_redirects(start) is callback  # pylint: disable=protected-access
+    assert [url.split("?", 1)[0] for url, _ in client.gets] == [
+        identity_callback, PORTAL + "/services/callbacklogin"]
+    assert all(kwargs["allow_redirects"] is False for _, kwargs in client.gets)
+    assert not any("user.html" in url for url, _ in client.gets)
 
 
-def test_login_probe_tolerates_portal_hiccup():
-    """A probe failure other than 401/403 (e.g. HTTP 500) is not an
-    authentication verdict: the login proceeds and the regular request path
-    handles the outage on its own retry cadence."""
-    client = _client_with_probe(500)
-    resp = _FakeResp(PORTAL + "/si/sl/user.html", status_code=200, history=[_callback_hop()])
-    client._finish_login(resp)  # pylint: disable=protected-access
+def test_login_skips_marketing_consent_without_consenting():
+    """The optional marketing consent page (issue #49) is skipped the way VW's
+    evcc update does it: its callback is followed, the page itself is never
+    fetched, and the callback query is re-encoded (raw spaces in scopes)."""
+    identity_callback = IDENTITY + "/oidc/v1/oauth/client/callback"
+    client = _login_client({
+        identity_callback: _redirect(identity_callback, CALLBACK_URL),
+        PORTAL + "/services/callbacklogin": _callback_resp(),
+    })
+    start = _redirect(IDENTITY + "/signin-service/v1/x/login/authenticate",
+                      MARKETING_PAGE + "?" + urlencode({"callback": identity_callback + "?scopes=openid cars&x=1"}))
+    client._finish_login(client._follow_login_redirects(start))  # pylint: disable=protected-access
+    fetched = [url for url, _ in client.gets]
+    assert fetched[0] == identity_callback + "?scopes=openid+cars&x=1"
+    assert not any("/consent/marketing/" in url for url in fetched)
+
+
+@pytest.mark.parametrize("callback", [
+    "http://identity.vwgroup.io/oidc/v1/oauth/client/callback",
+    "https://example.org/oidc/v1/oauth/client/callback",
+    "https://identity.vwgroup.io/unexpected/callback",
+    "",
+])
+def test_login_marketing_consent_with_unusable_callback_is_reported(callback):
+    """A marketing callback that is not https on the identity host with a known
+    path is never followed: the page is reported as a consent question."""
+    client = _login_client({MARKETING_PAGE: _FakeResp(MARKETING_PAGE + "?callback=z")})
+    query = "?" + urlencode({"callback": callback}) if callback else ""
+    start = _redirect(IDENTITY + "/signin-service/v1/x/login/authenticate", MARKETING_PAGE + query)
+    with pytest.raises(AuthError, match=r"consent question \(marketing\)"):
+        client._finish_login(client._follow_login_redirects(start))  # pylint: disable=protected-access
+    assert [url.split("?", 1)[0] for url, _ in client.gets] == [MARKETING_PAGE]
+
+
+@pytest.mark.parametrize("location", [
+    "https://attacker.example/content/euda/de/de/user.html",
+    "http://eu-data-act.drivesomethinggreater.com/services/callbacklogin",
+    "weconnect://callback?code=x",
+])
+def test_login_redirect_to_unexpected_location_fails(location):
+    client = _login_client()
+    start = _redirect(IDENTITY + "/signin-service/v1/x/login/authenticate", location)
+    with pytest.raises(AuthError, match="unexpected location"):
+        client._follow_login_redirects(start)  # pylint: disable=protected-access
+    assert not client.gets
+
+
+def test_login_redirect_loop_is_bounded():
+    loop = IDENTITY + "/loop"
+    client = _login_client({loop: _redirect(loop, loop)})
+    with pytest.raises(AuthError, match="exceeded 10 hops"):
+        client._follow_login_redirects(_redirect(loop, loop))  # pylint: disable=protected-access
+    assert len(client.gets) == 10
+
+
+SIGNIN_HTML = """<form action="/signin-service/v1/x/login/identifier">
+<input name="_csrf" value="c1"><input name="relayState" value="r1"><input name="hmac" value="h1"></form>"""
+AUTHENTICATE_HTML = """<script>window._IDK = { templateModel: {"hmac": "h2", "relayState": "r2"},
+csrf_token: 'c2' };</script>
+<form action="/signin-service/v1/x/login/authenticate"></form>"""
+
+
+def test_full_login_flow_follows_vw_requirements():
+    """End to end: no priming GET of the portal home page, credentials POSTed
+    without automatic redirects, and the login ends on the callback without
+    fetching the CMS page or probing the API."""
+    client = _login_client({
+        IDENTITY + "/oidc/v1/authorize": _FakeResp(IDENTITY + "/signin-service/v1/x/login", text=SIGNIN_HTML),
+        PORTAL + "/services/callbacklogin": _callback_resp(),
+    })
+    posts = []
+
+    def _post(url, data=None, **kwargs):
+        posts.append((url, data, kwargs))
+        if url.endswith("/identifier"):
+            return _FakeResp(IDENTITY + "/signin-service/v1/x/login/authenticate?relayState=r2",
+                             text=AUTHENTICATE_HTML)
+        return _redirect(url, CALLBACK_URL)
+
+    client._session.post = _post
+    client.login()
+
+    fetched = [url.split("?", 1)[0] for url, _ in client.gets]
+    assert fetched == [IDENTITY + "/oidc/v1/authorize", PORTAL + "/services/callbacklogin"]
+    assert posts[1][0] == IDENTITY + "/signin-service/v1/x/login/authenticate"
+    assert posts[1][1]["password"] == "p"
+    assert posts[1][2]["allow_redirects"] is False
+    assert client._logged_in  # pylint: disable=protected-access
+
+
+def test_user_agent_is_rfc9110_product_token():
+    """VW asked community clients for a product token, not a browser UA."""
+    ua = EudaApiClient(email="u", password="p")._session.headers["User-Agent"]
+    assert re.fullmatch(r"carconnectivity-connector-vw-eu-data-act/[!#$%&'*+\-.^_`|~0-9A-Za-z]+", ua)
+    assert "Mozilla" not in ua
 
 
 # --- datapoints identified by key only (issues #12 / #33) --------------------
@@ -1602,7 +1733,7 @@ window._IDK = {
 
 
 def _terms_client(accept, post_result):
-    """Client whose POSTs are captured and whose GET probe answers 200."""
+    """Client whose POSTs are captured."""
     client = EudaApiClient(email="u", password="p", accept_terms_on_login=accept)
     calls = []
 
@@ -1611,7 +1742,6 @@ def _terms_client(accept, post_result):
         return post_result
 
     client._session.post = _post
-    client._session.get = lambda url, **kwargs: _FakeResp(url, 200)
     return client, calls
 
 
@@ -1620,8 +1750,7 @@ def test_terms_interstitial_accepted_when_opted_in():
     interstitial's templateModel is POSTed (issue #15 recipe: countryOfResidence
     upper-cased, legalDocuments[0].* flattened with yes/no booleans, link and
     version keys excluded, _csrf from csrf_token) and the login completes."""
-    success = _FakeResp(PORTAL + "/si/sl/user.html", status_code=200, history=[_callback_hop()])
-    client, calls = _terms_client(True, success)
+    client, calls = _terms_client(True, _callback_resp())
     client._finish_login(_FakeResp(TERMS_URL, status_code=200, text=TERMS_HTML))  # pylint: disable=protected-access
 
     assert len(calls) == 1
